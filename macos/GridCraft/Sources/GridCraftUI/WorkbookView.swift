@@ -112,7 +112,16 @@ public struct WorkbookView: View {
                 handle(request)
             }
         }
-        .onAppear { document.undoManager = undoManager }
+        .onAppear {
+            document.undoManager = undoManager
+            WorkbookRegistry.shared.activated(document, editor: editor)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            // This window came to the front: intents and the control channel act on its workbook.
+            if (note.object as? NSWindow)?.contentView?.firstDescendant(of: GridNSView.self)?.document === document {
+                WorkbookRegistry.shared.activated(document, editor: editor)
+            }
+        }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { document.undoManager = undoManager }
         .alert("GridCraft", isPresented: Binding(get: { document.problem != nil }, set: { if !$0 { document.problem = nil } })) {
             Button("OK") { document.problem = nil }

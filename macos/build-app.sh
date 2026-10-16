@@ -23,7 +23,7 @@ BIN=$(swift build --package-path "$ROOT/macos/GridCraft" -c "$CONFIG" --show-bin
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/GridCraft" "$APP/Contents/MacOS/GridCraft"
-sed "s/__VERSION__/$VERSION/g" "$ROOT/macos/GridCraft/Resources/Info.plist" > "$APP/Contents/Info.plist"
+sed -e "s/\$(MARKETING_VERSION)/$VERSION/g" -e "s/\$(CURRENT_PROJECT_VERSION)/$VERSION/g" "$ROOT/macos/GridCraft/Resources/Info.plist" > "$APP/Contents/Info.plist"
 # SwiftPM resource bundles, if any target gains resources.
 find "$BIN" -maxdepth 1 -name '*.bundle' -exec cp -R {} "$APP/Contents/Resources/" \;
 codesign --force --sign - --timestamp=none "$APP" >/dev/null

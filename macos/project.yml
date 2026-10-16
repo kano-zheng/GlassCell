@@ -1,0 +1,35 @@
+# XcodeGen spec for GridCraft.app with its extensions (App Intents metadata and app extensions
+# need Xcode's build system). macos/build-xcode.sh generates GridCraft.xcodeproj (not committed)
+# and builds it. The SwiftPM package (macos/GridCraft) stays the place for code and tests.
+name: GridCraft
+options:
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  GridCraft:
+    path: GridCraft
+settings:
+  base:
+    MARKETING_VERSION: "0.7.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+targets:
+  GridCraft:
+    type: application
+    platform: macOS
+    sources:
+      - path: GridCraft/Sources/GridCraft
+    dependencies:
+      - package: GridCraft
+        product: GridCraftUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.gridcraft.mac
+        PRODUCT_NAME: GridCraft
+        INFOPLIST_FILE: GridCraft/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO

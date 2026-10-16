@@ -14,8 +14,10 @@ The native macOS frontend (SwiftUI, macOS 26+) over GridCraft's Rust engine. Pla
   `ReferenceFileDocument` over one engine session), the grid (`GridNSView`, drawn by
   `GridRenderer` from the engine's viewport and geometry) and the window (`WorkbookView`);
   `GridCraft` is the `DocumentGroup` app; `grid-snapshot` renders a grid offscreen and times it.
-- `build-app.sh`: builds `target/mac/GridCraft.app` (Info.plist with the xlsx/csv/tsv document
-  types, ad-hoc signed).
+- `build-app.sh`: builds `target/mac/GridCraft.app` with SwiftPM (Info.plist with the xlsx/csv/tsv
+  document types, ad-hoc signed): quick, but without App Intents metadata or extensions.
+- `project.yml` + `build-xcode.sh`: the full app through Xcode (XcodeGen generates
+  `GridCraft.xcodeproj`, not committed): App Intents metadata and the app extensions.
 
 ## Building and testing
 

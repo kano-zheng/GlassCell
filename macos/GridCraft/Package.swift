@@ -8,6 +8,10 @@ let swift6: [SwiftSetting] = [.swiftLanguageMode(.v6)]
 let package = Package(
     name: "GridCraft",
     platforms: [.macOS(.v26)],
+    products: [
+        // The Xcode project (macos/project.yml) builds the app and its extensions on this.
+        .library(name: "GridCraftUI", targets: ["GridCraftUI"]),
+    ],
     dependencies: [.package(path: "../GridCraftEngine")],
     targets: [
         .target(name: "GridCraftUI", dependencies: [.product(name: "GridCraftEngine", package: "GridCraftEngine")], swiftSettings: swift6),
