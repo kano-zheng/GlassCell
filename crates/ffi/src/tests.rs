@@ -77,6 +77,9 @@ fn selection_format_and_geometry_follow_the_selection() {
     assert_eq!(g.hit(r.x + 20.0, r.y + r.height / 2.0), GridHit::Cell { cell: CellAddress { row: 3, col: 1 } });
     assert!(!g.panes().is_empty());
     assert_eq!(g.x(u32::MAX), g.x(gridcraft_engine::core::MAX_COLS - 1));
+    assert_eq!(e.selection().unwrap().ranges, vec![CellRange { first: CellAddress { row: 3, col: 1 }, last: CellAddress { row: 3, col: 2 } }]);
+    let sheet = e.sheet().unwrap();
+    assert_eq!((sheet.name.as_str(), sheet.zoom), ("Sales", 100));
 }
 
 #[test]
@@ -89,4 +92,14 @@ fn ui_requests_and_the_clipboard_rules_come_through() {
     assert_eq!(e.paste_for_text("North".into()).unwrap(), PasteSource::Text { text: "North".into() });
     assert!(e.open_notice(r#"{"warnings": ["VBA project kept"]}"#.into()).unwrap().is_some_and(|n| n.kind == NoticeKind::Warning));
     assert!(e.open_notice("not json".into()).is_err());
+}
+
+#[test]
+fn references_are_named_like_the_engine_names_them() {
+    assert_eq!(column_label(0), "A");
+    assert_eq!(column_label(27), "AB");
+    assert_eq!(column_label(u32::MAX), "XFD");
+    assert_eq!(cell_name(CellAddress { row: 2, col: 1 }), "B3");
+    let r = CellRange { first: CellAddress { row: 0, col: 0 }, last: CellAddress { row: 4, col: 2 } };
+    assert_eq!(range_name(r), "A1:C5");
 }

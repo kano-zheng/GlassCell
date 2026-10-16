@@ -145,6 +145,38 @@ impl Engine {
         })
     }
 
+    /// The active sheet's selection.
+    pub fn selection(&self) -> Result<SelectionState, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            let sel = &d.selection;
+            Ok(SelectionState { active: sel.active.into(), ranges: sel.ranges.iter().map(|r| CellRange::from(*r)).collect() })
+        })
+    }
+
+    /// The active sheet's view settings.
+    pub fn sheet(&self) -> Result<SheetInfo, FfiError> {
+        guard(|| {
+            let (wb, si) = self.workbook()?;
+            let sh = wb.sheet(si).ok_or_else(|| engine_error("no sheet"))?;
+            let (fr, fc) = sh.freeze.unwrap_or((0, 0));
+            Ok(SheetInfo {
+                index: si as u32,
+                name: sh.name.clone(),
+                sheet_names: wb.sheets.iter().map(|s| s.name.clone()).collect(),
+                zoom: sh.zoom,
+                show_gridlines: sh.show_gridlines,
+                show_headings: sh.show_headings,
+                frozen: CellAddress { row: fr, col: fc },
+                right_to_left: sh.right_to_left,
+                normal_view: sh.view == model::SheetViewMode::Normal,
+                default_row_height: sh.default_row_height,
+                default_col_width: sh.default_col_width,
+            })
+        })
+    }
+
     /// Lays out a block of cells of the active workbook for drawing.
     pub fn viewport(&self, request: ViewportQuery, measurer: Arc<dyn TextMeasurer>) -> Result<Viewport, FfiError> {
         guard(|| {
@@ -259,6 +291,24 @@ impl Engine {
             Ok(s.host_clipboard.paste_command(system.as_deref(), internal).into())
         })
     }
+}
+
+/// A column's header label (`A`, `Z`, `AA`…).
+#[uniffi::export]
+pub fn column_label(col: u32) -> String {
+    gridcraft_engine::core::col_to_letters(col_of(col))
+}
+
+/// A cell's A1 reference (`B3`), for command parameters.
+#[uniffi::export]
+pub fn cell_name(cell: CellAddress) -> String {
+    CellRef::new(row_of(cell.row), col_of(cell.col)).a1()
+}
+
+/// A range's A1 reference (`B3:D7`, or `B3` for one cell), for command parameters.
+#[uniffi::export]
+pub fn range_name(range: CellRange) -> String {
+    range.to_engine().a1()
 }
 
 /// The grid geometry for one scroll position (see [`Engine::geometry`]).

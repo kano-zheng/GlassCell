@@ -265,7 +265,11 @@ impl From<vp::CellView> for CellView {
             merged: c.merged,
             fill: c.fill.map(Rgb::from),
             data_bar: c.data_bar.map(|b| DataBar { fraction: b.fraction, color: b.color.into(), gradient: b.gradient }),
-            icon: c.icon.map(|i| CfIcon { set: i.set, index: u32::try_from(i.index).unwrap_or(u32::MAX) }),
+            icon: c.icon.map(|i| CfIcon {
+                count: u32::try_from(gridcraft_engine::cf::icon_count(&i.set)).unwrap_or(u32::MAX),
+                set: i.set,
+                index: u32::try_from(i.index).unwrap_or(u32::MAX),
+            }),
             checkbox: c.checkbox,
             picture: c.picture,
             text: c.text.map(CellText::from),
@@ -360,7 +364,10 @@ pub struct DataBar {
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct CfIcon {
     pub set: String,
+    /// 0 = lowest.
     pub index: u32,
+    /// Icons in the set.
+    pub count: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -381,6 +388,8 @@ pub struct BorderSegment {
     pub from: u32,
     pub to: u32,
     pub style: BorderStyle,
+    /// Line width at 100% (screen units before zoom).
+    pub width: f32,
     pub color: Rgb,
 }
 
@@ -394,7 +403,7 @@ impl From<vp::BorderSeg> for BorderSegment {
             vp::Edge::DiagDown => BorderEdge::DiagDown,
             vp::Edge::DiagUp => BorderEdge::DiagUp,
         };
-        BorderSegment { edge, from: b.from, to: b.to, style: b.style.into(), color: b.color.into() }
+        BorderSegment { edge, from: b.from, to: b.to, style: b.style.into(), width: b.style.width(), color: b.color.into() }
     }
 }
 
@@ -601,6 +610,31 @@ impl SelectionFormat {
 }
 
 // ------------------------------------------------------------------ session
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SelectionState {
+    pub active: CellAddress,
+    /// The selected areas; the last holds the active cell.
+    pub ranges: Vec<CellRange>,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SheetInfo {
+    pub index: u32,
+    pub name: String,
+    pub sheet_names: Vec<String>,
+    /// Percent, 10–400.
+    pub zoom: u16,
+    pub show_gridlines: bool,
+    pub show_headings: bool,
+    /// Frozen rows (`row`) and columns (`col`).
+    pub frozen: CellAddress,
+    pub right_to_left: bool,
+    /// Normal view (not Page Layout or Page Break Preview).
+    pub normal_view: bool,
+    pub default_row_height: f32,
+    pub default_col_width: f32,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum UiRequest {
