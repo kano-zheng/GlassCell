@@ -12,6 +12,20 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>GridCraft</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>cs</string>
+		<string>de</string>
+		<string>es</string>
+		<string>fr</string>
+		<string>ja</string>
+		<string>ko</string>
+		<string>pt-BR</string>
+		<string>ru</string>
+		<string>sr</string>
+		<string>zh-Hans</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>GridCraft</string>
 	<key>CFBundlePackageType</key>

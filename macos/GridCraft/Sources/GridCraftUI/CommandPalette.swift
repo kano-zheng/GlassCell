@@ -31,7 +31,7 @@ struct CommandPalette: View {
             Divider()
             List(matches, id: \.id, selection: $selection) { info in
                 HStack {
-                    Text(info.label)
+                    Text(LocalizedStringKey(info.label))
                     Spacer()
                     Text(info.menu.joined(separator: " ▸ "))
                         .foregroundStyle(.secondary)

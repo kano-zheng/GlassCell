@@ -211,9 +211,9 @@ struct MenuItems: View {
     var body: some View {
         let sections = MacPlacement.sections(menu, in: catalog)
         ForEach(sections, id: \.title) { section in
-            Section(section.title) {
+            Section(LocalizedStringKey(section.title)) {
                 ForEach(section.commands, id: \.id) { info in
-                    Button(info.label) {
+                    Button(LocalizedStringKey(info.label)) {
                         guard let focus, focus.editor.commitIfEditing() else { return }
                         if MacActions.handled.contains(info.id) {
                             MacActions.run(info.id, document: focus.document)

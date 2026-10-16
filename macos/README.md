@@ -38,6 +38,11 @@ SKIP_ENGINE=1 macos/build-app.sh && open target/mac/GridCraft.app
 `PROFILE=dev` builds the engine unoptimised (faster to build, slow to run); `ARCHS=arm64` builds
 this Mac's architecture only.
 
+## Localization
+
+`GridCraft/Resources/Localizable.xcstrings` is generated from egui's translation tables:
+`cargo xtask mac-strings` after changing them (`--check` verifies it is current).
+
 ## Rules
 
 - Swift 6 language mode, strict concurrency. One `Engine` per document, used from one actor.

@@ -24,6 +24,8 @@ targets:
     platform: macOS
     sources:
       - path: GridCraft/Sources/GridCraft
+      - path: GridCraft/Resources/Localizable.xcstrings
+        buildPhase: resources
     dependencies:
       - package: GridCraft
         product: GridCraftUI

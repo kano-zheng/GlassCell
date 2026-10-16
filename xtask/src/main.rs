@@ -8,6 +8,7 @@
 mod assets;
 mod ico;
 mod keytips;
+mod mac_strings;
 mod layers;
 #[cfg_attr(not(feature = "engine"), allow(dead_code))]
 mod parity;
@@ -35,6 +36,7 @@ commands:
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
   ico <out.ico> <in.png>...
                   pack square PNGs (<= 256 px) into a Windows .ico (see packaging/icons.sh)
+  mac-strings [--check]   regenerate the Mac app's String Catalog from the egui translations
 ";
 
 fn main() -> ExitCode {
@@ -50,6 +52,7 @@ fn main() -> ExitCode {
         Some("keytips") => keytips::run(&root(), &rest),
         Some("ico") => ico::run(&rest),
         Some("version") => version::run(&root(), &rest),
+        Some("mac-strings") => mac_strings::run(&root(), &rest),
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");
             Ok(())
