@@ -34,3 +34,19 @@ import Testing
         #expect(document.problem != nil)
     }
 }
+
+@MainActor
+@Suite struct UndoRobustnessTests {
+    /// An undo manager without event grouping threw "must begin a group" (and took the app down)
+    /// when a command registered its step outside a group.
+    @Test func registeringOutsideAGroupDoesNotThrow() {
+        let document = SpreadsheetDocument()
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        document.undoManager = undo
+        document.run("cell.set", ["cell": "A1", "input": "x"])
+        #expect(undo.canUndo)
+        undo.undo()
+        #expect(undo.canRedo)
+    }
+}

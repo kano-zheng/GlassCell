@@ -77,12 +77,26 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
         }
     }
 
+    /// Runs several commands as one step for Edit ▸ Undo (moving cells is a cut and a paste).
+    @MainActor public func grouped(_ body: () -> Void) {
+        undoManager?.beginUndoGrouping()
+        body()
+        undoManager?.endUndoGrouping()
+    }
+
     @MainActor private func registerUndo(_ label: String) {
+        register(label) { document in document.step("edit.undo") }
+    }
+
+    /// Registers one undo step. An undo manager that doesn't group by event throws (and the app
+    /// goes down) when nothing opened a group: open one then.
+    @MainActor private func register(_ label: String, _ handler: @escaping @MainActor (SpreadsheetDocument) -> Void) {
         guard let undoManager else { return }
-        undoManager.registerUndo(withTarget: self) { document in
-            document.step("edit.undo")
-        }
+        let ownGroup = !undoManager.groupsByEvent && undoManager.groupingLevel == 0
+        if ownGroup { undoManager.beginUndoGrouping() }
+        undoManager.registerUndo(withTarget: self) { document in handler(document) }
         undoManager.setActionName(label)
+        if ownGroup { undoManager.endUndoGrouping() }
     }
 
     /// Undo or redo one engine step, registering the opposite step.
@@ -94,11 +108,8 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
             problem = error.localizedDescription
             return
         }
-        guard let undoManager, let history = try? engine.history() else { return }
+        guard let history = try? engine.history() else { return }
         let opposite = id == "edit.undo" ? "edit.redo" : "edit.undo"
-        undoManager.registerUndo(withTarget: self) { document in
-            document.step(opposite)
-        }
-        undoManager.setActionName((id == "edit.undo" ? history.redo.first : history.undo.first) ?? "")
+        register((id == "edit.undo" ? history.redo.first : history.undo.first) ?? "") { document in document.step(opposite) }
     }
 }

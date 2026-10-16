@@ -131,3 +131,15 @@ fn editing_starts_from_the_engine_and_commits_through_it() {
     assert_eq!(e.point_reference(r, 0).unwrap(), "A1:B2");
     assert_eq!(e.column_completion(CellAddress { row: 10, col: 1 }, "Nor".into()).unwrap().as_deref(), Some("North"));
 }
+
+#[test]
+fn fill_and_resize_rules_come_through() {
+    let e = engine();
+    let a = |row, col| CellAddress { row, col };
+    assert_eq!(fill_target(CellRange { first: a(4, 2), last: a(4, 2) }, a(9, 2)), CellRange { first: a(4, 2), last: a(9, 2) });
+    // H5: the column beside it (G, the totals) has data down to G11.
+    e.execute("selection.set".into(), r#"{"range": "H5"}"#.into()).unwrap();
+    assert_eq!(e.fill_down_target().unwrap(), Some(CellRange { first: a(4, 7), last: a(10, 7) }));
+    assert_eq!(e.resize_columns(3).unwrap(), "D:D");
+    assert!(resize_label(true, 64.0).starts_with("Width: 8.43"));
+}

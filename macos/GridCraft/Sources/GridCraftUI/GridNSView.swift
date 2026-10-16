@@ -90,6 +90,7 @@ public final class GridNSView: NSView {
             let layout = try renderer.draw(in: ctx, size: bounds.size, scroll: scroll)
             layoutCache = layout
             drawReferenceOutlines(ctx, layout: layout)
+            drawDragPreview(ctx, layout: layout)
         } catch {
             failure = error.localizedDescription
         }
@@ -129,6 +130,31 @@ public final class GridNSView: NSView {
             ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
         }
         ctx.restoreGState()
+    }
+
+    /// A fill or move in progress: the target outlined; a resize: the guide line.
+    private func drawDragPreview(_ ctx: CGContext, layout: GridRenderer.Layout) {
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        ctx.setStrokeColor(NSColor.secondaryLabelColor.cgColor)
+        if let target = fillPreview ?? movePreview {
+            ctx.setLineWidth(1.5)
+            ctx.setLineDash(phase: 0, lengths: [4, 3])
+            ctx.stroke(cgRect(layout.geometry.rangeRect(range: target)).insetBy(dx: 0.5, dy: 0.5))
+        }
+        if let guide = resizeGuide {
+            ctx.setLineWidth(1)
+            ctx.setLineDash(phase: 0, lengths: [3, 2])
+            ctx.beginPath()
+            if guide.columns {
+                ctx.move(to: CGPoint(x: guide.at, y: 0))
+                ctx.addLine(to: CGPoint(x: guide.at, y: bounds.height))
+            } else {
+                ctx.move(to: CGPoint(x: 0, y: guide.at))
+                ctx.addLine(to: CGPoint(x: bounds.width, y: guide.at))
+            }
+            ctx.strokePath()
+        }
     }
 
     // MARK: - The cell editor
@@ -237,9 +263,21 @@ public final class GridNSView: NSView {
     // MARK: - Selection
 
     /// What a drag that started with the mouse down extends.
-    private enum DragKind {
+    private enum DragKind: Equatable {
         case none, cells, rows, columns, pointing
+        /// The fill handle: from `source`, to where the pointer is.
+        case fill(source: CellRange)
+        /// Resizing column / row `index`, which started `original` sheet units big, from screen `start`.
+        case resizeColumn(index: UInt32, start: CGFloat, original: CGFloat)
+        case resizeRow(index: UInt32, start: CGFloat, original: CGFloat)
+        /// Moving the selection by its border: grabbed at `grab`.
+        case move(grab: CellAddress)
     }
+
+    /// The live outcome of a drag, drawn over the grid until the mouse goes up.
+    private var fillPreview: CellRange?
+    private var movePreview: CellRange?
+    private var resizeGuide: (columns: Bool, at: CGFloat, size: CGFloat)?
 
     private var drag = DragKind.none
     /// The cell where the drag started (the selection's anchor).
@@ -272,12 +310,58 @@ public final class GridNSView: NSView {
             guard editor.commit() else { return }
             editorEnded()
         }
+        let inColumnHeader = p.y < layout.headerHeight && p.x >= layout.headerWidth
+        let inRowHeader = p.x < layout.headerWidth && p.y >= layout.headerHeight
+        // Header edges: drag to resize, double-click to AutoFit (the selected whole columns or rows).
+        if inColumnHeader, let edge = geometry.colEdge(x: Float(p.x)) {
+            if event.clickCount == 2 {
+                document.run("home.autofitColumnWidth", ["cols": (try? document.engine.resizeColumns(col: edge.index)) ?? ""])
+                drag = .none
+            } else {
+                let width = cgRect(geometry.cellRect(cell: CellAddress(row: 0, col: edge.index))).width / CGFloat(layout.scale)
+                drag = .resizeColumn(index: edge.index, start: p.x, original: width)
+            }
+            needsDisplay = true
+            return
+        }
+        if inRowHeader, let edge = geometry.rowEdge(y: Float(p.y)) {
+            if event.clickCount == 2 {
+                document.run("home.autofitRowHeight", ["rows": (try? document.engine.resizeRows(row: edge.index)) ?? ""])
+                drag = .none
+            } else {
+                let height = cgRect(geometry.cellRect(cell: CellAddress(row: edge.index, col: 0))).height / CGFloat(layout.scale)
+                drag = .resizeRow(index: edge.index, start: p.y, original: height)
+            }
+            needsDisplay = true
+            return
+        }
+        if p.x >= layout.headerWidth, p.y >= layout.headerHeight, let current = try? document.engine.selection().ranges.last {
+            switch geometry.hit(x: Float(p.x), y: Float(p.y)) {
+            case .fillHandle:
+                if event.clickCount == 2 {
+                    if let target = try? document.engine.fillDownTarget() {
+                        document.run("edit.autoFill", ["source": rangeName(range: current), "target": rangeName(range: target)])
+                    }
+                    drag = .none
+                } else {
+                    drag = .fill(source: current)
+                    fillPreview = current
+                }
+                needsDisplay = true
+                return
+            case .selectionBorder:
+                drag = .move(grab: CellAddress(row: geometry.rowAt(y: Float(p.y)), col: geometry.colAt(x: Float(p.x))))
+                movePreview = current
+                needsDisplay = true
+                return
+            default:
+                break
+            }
+        }
         if event.clickCount == 2, p.x >= layout.headerWidth, p.y >= layout.headerHeight {
             beginEditing()
             return
         }
-        let inColumnHeader = p.y < layout.headerHeight && p.x >= layout.headerWidth
-        let inRowHeader = p.x < layout.headerWidth && p.y >= layout.headerHeight
         if p.x < layout.headerWidth && p.y < layout.headerHeight {
             document.run("edit.selectAll")
             drag = .none
@@ -318,13 +402,99 @@ public final class GridNSView: NSView {
         case .pointing:
             editor?.pointClick(dragAnchor, extendingTo: cell)
             cellEditor.sync(force: true)
+        case let .fill(source):
+            fillPreview = fillTarget(source: source, pointer: cell)
+        case let .move(grab):
+            if let current = try? document?.engine.selection().ranges.last {
+                movePreview = moved(current, by: Int(cell.row) - Int(grab.row), Int(cell.col) - Int(grab.col))
+            }
+        case let .resizeColumn(_, start, original):
+            let size = max(0, original + (p.x - start) / CGFloat(layout.scale))
+            resizeGuide = (true, p.x, size)
+            document?.notice = resizeLabel(columns: true, size: Float(size))
+        case let .resizeRow(_, start, original):
+            let size = max(0, original + (p.y - start) / CGFloat(layout.scale))
+            resizeGuide = (false, p.y, size)
+            document?.notice = resizeLabel(columns: false, size: Float(size))
         case .none: break
         }
         needsDisplay = true
     }
 
     public override func mouseUp(with event: NSEvent) {
-        drag = .none
+        defer {
+            drag = .none
+            fillPreview = nil
+            movePreview = nil
+            resizeGuide = nil
+            needsDisplay = true
+        }
+        guard let document else { return }
+        switch drag {
+        case let .fill(source):
+            if let target = fillPreview, target != source {
+                // ⌘ swaps copying and extending a series, as in Excel.
+                let mode = event.modifierFlags.contains(.command) ? "alternate" : "series"
+                document.run("edit.autoFill", ["source": rangeName(range: source), "target": rangeName(range: target), "mode": mode])
+                document.run("selection.set", ["range": rangeName(range: target)])
+            }
+        case .move:
+            if let current = try? document.engine.selection().ranges.last, let to = movePreview, to != current {
+                document.grouped {
+                    document.run("edit.cut", ["range": rangeName(range: current)])
+                    document.run("edit.paste", ["at": cellName(cell: to.first)])
+                }
+            }
+        case let .resizeColumn(index, _, _):
+            if let guide = resizeGuide {
+                document.run("home.columnWidth", ["cols": (try? document.engine.resizeColumns(col: index)) ?? "", "width": guide.size.rounded()])
+            }
+        case let .resizeRow(index, _, _):
+            if let guide = resizeGuide {
+                document.run("home.rowHeight", ["rows": (try? document.engine.resizeRows(row: index)) ?? "", "height": guide.size.rounded()])
+            }
+        default:
+            break
+        }
+    }
+
+    /// `range` moved by rows and columns, kept on the sheet.
+    private func moved(_ range: CellRange, by dr: Int, _ dc: Int) -> CellRange {
+        let height = Int(range.last.row) - Int(range.first.row), width = Int(range.last.col) - Int(range.first.col)
+        let row = max(0, min(Int(Self.lastRow) - height, Int(range.first.row) + dr))
+        let col = max(0, min(Int(Self.lastCol) - width, Int(range.first.col) + dc))
+        return CellRange(first: CellAddress(row: UInt32(row), col: UInt32(col)), last: CellAddress(row: UInt32(row + height), col: UInt32(col + width)))
+    }
+
+    // MARK: - Cursors
+
+    private var tracking: NSTrackingArea?
+
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    public override func mouseMoved(with event: NSEvent) {
+        guard let layout = layoutCache else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        let geometry = layout.geometry
+        if p.y < layout.headerHeight, p.x >= layout.headerWidth, geometry.colEdge(x: Float(p.x)) != nil {
+            NSCursor.columnResize.set()
+        } else if p.x < layout.headerWidth, p.y >= layout.headerHeight, geometry.rowEdge(y: Float(p.y)) != nil {
+            NSCursor.rowResize.set()
+        } else if p.x >= layout.headerWidth, p.y >= layout.headerHeight, editor?.isEditing != true {
+            switch geometry.hit(x: Float(p.x), y: Float(p.y)) {
+            case .fillHandle: NSCursor.crosshair.set()
+            case .selectionBorder: NSCursor.openHand.set()
+            default: NSCursor.arrow.set()
+            }
+        } else {
+            NSCursor.arrow.set()
+        }
     }
 
     private func shiftAnchor(_ flags: NSEvent.ModifierFlags) -> CellAddress? {

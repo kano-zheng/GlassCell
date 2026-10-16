@@ -348,6 +348,73 @@ impl Geometry {
     }
 }
 
+/// Where a fill-handle drag of `source` to the cell under the pointer fills: the source
+/// extended along the axis the pointer moved further out on (the source itself while the
+/// pointer is inside it).
+pub fn fill_target(source: RangeRef, pointer: CellRef) -> RangeRef {
+    let below = i64::from(pointer.row) - i64::from(source.end.row);
+    let above = i64::from(source.start.row) - i64::from(pointer.row);
+    let right = i64::from(pointer.col) - i64::from(source.end.col);
+    let left = i64::from(source.start.col) - i64::from(pointer.col);
+    let (vert, horiz) = (below.max(above), right.max(left));
+    if vert <= 0 && horiz <= 0 {
+        return source;
+    }
+    if vert >= horiz {
+        if below > 0 {
+            RangeRef::new(source.start, CellRef::new(pointer.row, source.end.col))
+        } else {
+            RangeRef::new(CellRef::new(pointer.row, source.start.col), source.end)
+        }
+    } else if right > 0 {
+        RangeRef::new(source.start, CellRef::new(source.end.row, pointer.col))
+    } else {
+        RangeRef::new(CellRef::new(source.start.row, pointer.col), source.end)
+    }
+}
+
+/// A double-click on the fill handle fills `source` down as far as the column beside it (left,
+/// or right in column A) has data; `None` when there is nothing to fill.
+pub fn fill_down_target(sh: &Sheet, source: RangeRef) -> Option<RangeRef> {
+    let neighbour = if source.start.col > 0 { source.start.col - 1 } else { source.end.col.saturating_add(1) };
+    let mut last = source.end.row;
+    while last + 1 < MAX_ROWS && last - source.end.row < 1_000_000 && sh.value_ref(CellRef::new(last + 1, neighbour)).is_some_and(|v| !v.is_empty()) {
+        last += 1;
+    }
+    (last > source.end.row).then(|| RangeRef::new(source.start, CellRef::new(last, source.end.col)))
+}
+
+/// The columns a resize (or AutoFit) of column `col` changes, as `home.columnWidth`'s `cols`:
+/// inside a selection of whole columns every selected column (⌘-selected areas too), otherwise
+/// the one dragged.
+pub fn resize_columns(sel: &Selection, col: u32) -> String {
+    if sel.ranges.iter().any(|r| r.is_full_cols() && col >= r.start.col && col <= r.end.col) {
+        sel.ranges.iter().filter(|r| r.is_full_cols()).map(|r| r.a1()).collect::<Vec<_>>().join(",")
+    } else {
+        RangeRef::cols(col, col).a1()
+    }
+}
+
+/// The rows a resize (or AutoFit) of row `row` changes, as `home.rowHeight`'s `rows`.
+pub fn resize_rows(sel: &Selection, row: u32) -> String {
+    if sel.ranges.iter().any(|r| r.is_full_rows() && row >= r.start.row && row <= r.end.row) {
+        sel.ranges.iter().filter(|r| r.is_full_rows()).map(|r| format!("{}:{}", r.start.row + 1, r.end.row + 1)).collect::<Vec<_>>().join(",")
+    } else {
+        format!("{}:{}", row + 1, row + 1)
+    }
+}
+
+/// What a resize shows while dragging: `Width: 8.43 (64 pixels)` (characters of the default
+/// font, and sheet units) or `Height: 15.00 (20 pixels)` (points).
+pub fn resize_label(columns: bool, size: f32) -> String {
+    let size = if size.is_finite() { size.max(0.0) } else { 0.0 };
+    if columns {
+        format!("Width: {:.2} ({} pixels)", gridcraft_model::points_to_chars(f64::from(size)), size.round())
+    } else {
+        format!("Height: {:.2} ({} pixels)", size * 0.75, size.round())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gridcraft_model::LineInfo;
@@ -412,6 +479,28 @@ mod tests {
         assert_eq!(g.hit(&sh, &sel, chart.x + 5.0, chart.y + 5.0), Hit::Object { object: "chart".into(), id, rect: chart });
         assert_eq!(g.col_edge(&sh, g.x(2) + 2.0).map(|e| e.0), Some(1));
         assert_eq!(g.col_edge(&sh, g.x(2) + 30.0), None);
+    }
+
+    #[test]
+    fn fill_handle_and_resize_rules() {
+        let src = RangeRef::new(CellRef::new(1, 1), CellRef::new(2, 2));
+        assert_eq!(fill_target(src, CellRef::new(9, 3)).a1(), "B2:C10", "further down than right");
+        assert_eq!(fill_target(src, CellRef::new(3, 9)).a1(), "B2:J3");
+        assert_eq!(fill_target(src, CellRef::new(0, 1)).a1(), "B1:C3");
+        assert_eq!(fill_target(src, CellRef::new(2, 2)), src);
+        let mut sh = Sheet::new("S");
+        for r in 0..5 {
+            sh.set_value(CellRef::new(r, 0), gridcraft_core::Value::Number(1.0));
+        }
+        assert_eq!(fill_down_target(&sh, RangeRef::cell(CellRef::new(0, 1))).map(|r| r.a1()).as_deref(), Some("B1:B5"));
+        assert_eq!(fill_down_target(&sh, RangeRef::cell(CellRef::new(4, 1))), None);
+        let mut sel = Selection::at(CellRef::new(0, 2));
+        assert_eq!(resize_columns(&sel, 4), "E:E");
+        sel.ranges = vec![RangeRef::cols(2, 3), RangeRef::cols(6, 6)];
+        assert_eq!(resize_columns(&sel, 3), "C:D,G:G");
+        assert_eq!(resize_rows(&sel, 0), "1:1");
+        assert_eq!(resize_label(true, 64.0), "Width: 8.43 (64 pixels)");
+        assert_eq!(resize_label(false, f32::NAN), "Height: 0.00 (0 pixels)");
     }
 
     #[test]

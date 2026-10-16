@@ -200,6 +200,35 @@ impl Engine {
         })
     }
 
+    /// Double-clicking the fill handle: where the current area fills down to (as far as the
+    /// column beside it has data), or `None`.
+    pub fn fill_down_target(&self) -> Result<Option<CellRange>, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            let sh = d.wb.active().ok_or_else(|| engine_error("no sheet"))?;
+            Ok(gridcraft_engine::geometry::fill_down_target(sh, d.selection.current()).map(CellRange::from))
+        })
+    }
+
+    /// The columns resizing (or AutoFitting) column `col` changes, as `home.columnWidth`'s `cols`.
+    pub fn resize_columns(&self, col: u32) -> Result<String, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            Ok(gridcraft_engine::geometry::resize_columns(&d.selection, col_of(col)))
+        })
+    }
+
+    /// The rows resizing (or AutoFitting) row `row` changes, as `home.rowHeight`'s `rows`.
+    pub fn resize_rows(&self, row: u32) -> Result<String, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            Ok(gridcraft_engine::geometry::resize_rows(&d.selection, row_of(row)))
+        })
+    }
+
     /// The active sheet's selection.
     pub fn selection(&self) -> Result<SelectionState, FfiError> {
         guard(|| {
@@ -346,6 +375,18 @@ impl Engine {
             Ok(s.host_clipboard.paste_command(system.as_deref(), internal).into())
         })
     }
+}
+
+/// Where a fill-handle drag of `source` to the cell under the pointer fills.
+#[uniffi::export]
+pub fn fill_target(source: CellRange, pointer: CellAddress) -> CellRange {
+    gridcraft_engine::geometry::fill_target(source.to_engine(), CellRef::new(row_of(pointer.row), col_of(pointer.col))).into()
+}
+
+/// The label a row or column resize shows: `Width: 8.43 (64 pixels)`, `Height: 15.00 (20 pixels)`.
+#[uniffi::export]
+pub fn resize_label(columns: bool, size: f32) -> String {
+    gridcraft_engine::geometry::resize_label(columns, size)
 }
 
 /// A column's header label (`A`, `Z`, `AA`…).

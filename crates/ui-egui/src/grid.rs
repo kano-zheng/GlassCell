@@ -1600,15 +1600,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         && let Some(p) = pos
     {
         let autofit = if in_col_header {
-            col_edge(geo, sh, p.x).map(|(col, _)| {
-                let selected = sel.ranges.iter().any(|r| r.is_full_cols() && col >= r.start.col && col <= r.end.col);
-                ("home.autofitColumnWidth", if selected { json!({}) } else { json!({"cols": RangeRef::cols(col, col).a1()}) })
-            })
+            col_edge(geo, sh, p.x).map(|(col, _)| ("home.autofitColumnWidth", json!({"cols": gridcraft_engine::geometry::resize_columns(&sel, col)})))
         } else if in_row_header {
-            row_edge(geo, sh, p.y).map(|(row, _)| {
-                let selected = sel.ranges.iter().any(|r| r.is_full_rows() && row >= r.start.row && row <= r.end.row);
-                ("home.autofitRowHeight", if selected { json!({}) } else { json!({"rows": RangeRef::rows(row, row).a1()}) })
-            })
+            row_edge(geo, sh, p.y).map(|(row, _)| ("home.autofitRowHeight", json!({"rows": gridcraft_engine::geometry::resize_rows(&sel, row)})))
         } else {
             None
         };
@@ -1628,14 +1622,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     {
         // Fill down as far as the neighbouring column goes.
         let src = sel.current();
-        let neighbour = if src.start.col > 0 { src.start.col - 1 } else { src.end.col + 1 };
-        let mut last = src.end.row;
-        while last + 1 < MAX_ROWS && sh.value_ref(CellRef::new(last + 1, neighbour)).is_some_and(|v| !v.is_empty()) && last - src.end.row < 1_000_000
-        {
-            last += 1;
-        }
-        if last > src.end.row {
-            let target = RangeRef::new(src.start, CellRef::new(last, src.end.col));
+        if let Some(target) = gridcraft_engine::geometry::fill_down_target(sh, src) {
             let _ = app.run("edit.autoFill", json!({"source": src.a1(), "target": target.a1()}));
         }
         app.grid.drag = Drag::None;
@@ -1847,31 +1834,15 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             }
             Drag::ResizeCol { col, start, orig } => {
                 let w = (orig + (p.x - start) / geo.z).max(0.0);
-                app.toast =
-                    Some((format!("Width: {:.2} ({} pixels)", gridcraft_engine::cmd::format::points_to_chars(w as f64), w.round()), crate::now_ms()));
-                // Inside a selection of whole columns, every selected column takes the new width
-                // (Ctrl-selected areas included); otherwise only the dragged one.
-                let cols = if sel.ranges.iter().any(|r| r.is_full_cols() && col >= r.start.col && col <= r.end.col) {
-                    sel.ranges.iter().filter(|r| r.is_full_cols()).map(|r| r.a1()).collect::<Vec<_>>().join(",")
-                } else {
-                    RangeRef::cols(col, col).a1()
-                };
+                app.toast = Some((gridcraft_engine::geometry::resize_label(true, w), crate::now_ms()));
+                let cols = gridcraft_engine::geometry::resize_columns(&sel, col);
                 let _ = app.session.run("home.columnWidth", json!({"cols": cols, "width": w.round()}));
                 coalesce_last_undo(app);
             }
             Drag::ResizeRow { row, start, orig } => {
                 let h = (orig + (p.y - start) / geo.z).max(0.0);
-                app.toast = Some((format!("Height: {:.2} ({} pixels)", h * 0.75, h.round()), crate::now_ms()));
-                let rows = if sel.ranges.iter().any(|r| r.is_full_rows() && row >= r.start.row && row <= r.end.row) {
-                    sel.ranges
-                        .iter()
-                        .filter(|r| r.is_full_rows())
-                        .map(|r| format!("{}:{}", r.start.row + 1, r.end.row + 1))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                } else {
-                    format!("{}:{}", row + 1, row + 1)
-                };
+                app.toast = Some((gridcraft_engine::geometry::resize_label(false, h), crate::now_ms()));
+                let rows = gridcraft_engine::geometry::resize_rows(&sel, row);
                 let _ = app.session.run("home.rowHeight", json!({"rows": rows, "height": h.round()}));
                 coalesce_last_undo(app);
             }
@@ -2045,26 +2016,7 @@ fn scroll_by(app: &mut SheetApp, d: egui::Vec2) {
 }
 
 fn fill_target(src: RangeRef, pc: CellRef) -> RangeRef {
-    let below = pc.row as i64 - src.end.row as i64;
-    let above = src.start.row as i64 - pc.row as i64;
-    let right = pc.col as i64 - src.end.col as i64;
-    let left = src.start.col as i64 - pc.col as i64;
-    let vert = below.max(above);
-    let horiz = right.max(left);
-    if vert <= 0 && horiz <= 0 {
-        return src;
-    }
-    if vert >= horiz {
-        if below > 0 {
-            RangeRef::new(src.start, CellRef::new(pc.row, src.end.col))
-        } else {
-            RangeRef::new(CellRef::new(pc.row, src.start.col), src.end)
-        }
-    } else if right > 0 {
-        RangeRef::new(src.start, CellRef::new(src.end.row, pc.col))
-    } else {
-        RangeRef::new(CellRef::new(src.start.row, pc.col), src.end)
-    }
+    gridcraft_engine::geometry::fill_target(src, pc)
 }
 
 fn on_border(r: Rect, p: Pos2) -> bool {
