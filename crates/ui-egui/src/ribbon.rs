@@ -302,13 +302,7 @@ fn sep(ui: &mut Ui) {
 }
 
 fn active_style(app: &SheetApp) -> Style {
-    app.session
-        .active()
-        .and_then(|d| {
-            let sh = d.wb.active()?;
-            Some(d.wb.styles.get(sh.style_id(d.selection.active)).clone())
-        })
-        .unwrap_or_default()
+    app.session.active().map(|d| gridcraft_engine::selection_format::active_style(&d.wb, d.wb.active_sheet, &d.selection)).unwrap_or_default()
 }
 
 fn theme_colors(app: &SheetApp) -> [u32; 12] {

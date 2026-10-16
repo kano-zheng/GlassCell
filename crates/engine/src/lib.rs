@@ -20,6 +20,7 @@ pub mod pivot;
 pub mod pivot_calc;
 pub mod sample;
 pub mod selection;
+pub mod selection_format;
 pub mod tables;
 pub mod viewport;
 

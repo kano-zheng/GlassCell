@@ -10,6 +10,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "document.inspect", "Inspect Workbook", [], None, "{} → sheets, selection, names, tables, charts, dirty, history", has_doc, inspect),
         cmd!(query "sheet.read", "Read Range", [], None, "{range?: \"A1:D10\" (default: used range), sheet?, formulas?: bool, formatted?: bool} → rows of values", has_doc, read),
         cmd!(query "cell.get", "Get Cell", [], None, "{cell?, sheet?} → value, formula, display text, style, comment, link", has_doc, cell_get),
+        cmd!(
+            query "selection.format",
+            "Selection Format",
+            [],
+            None,
+            "{} → active (the active cell's style), cells, and the selection's font, fill, alignment, number, borders, protection (null = mixed)",
+            has_doc,
+            sel_format
+        ),
         cmd!(query "selection.stats", "Selection Statistics", [], None, "{} → count, sum, average, min, max", has_doc, sel_stats),
         cmd!(query "history.list", "Undo History", [], None, "{} → undo/redo labels", has_doc, history),
         cmd!(query "app.commands", "List Commands", [], None, "{search?} → ids, labels, params", always, list_commands),
@@ -137,6 +146,12 @@ fn cell_get(s: &mut Session, p: &Json) -> Result<Json> {
         "comment": sh.comments.get(&c),
         "hyperlink": sh.hyperlinks.get(&c),
     }))
+}
+
+fn sel_format(s: &mut Session, _: &Json) -> Result<Json> {
+    let d = s.doc()?;
+    let f = crate::selection_format::selection_format(&d.wb, d.wb.active_sheet, &d.selection);
+    serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn sel_stats(s: &mut Session, _: &Json) -> Result<Json> {

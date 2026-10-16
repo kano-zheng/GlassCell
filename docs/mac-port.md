@@ -6,9 +6,10 @@ A native macOS frontend in SwiftUI over GridCraft's Rust engine, in a fork of `s
 
 ## Status
 
-**MAC1 in progress.** MAC1.1 (viewport read model) has landed; next task: **MAC1.2**.
+**MAC1 in progress.** MAC1.1 (viewport read model) and MAC1.2 (`selection.format`) have landed; next task: **MAC1.3**.
 
 - **MAC1.1 done.** `gridcraft_engine::viewport` lays out a block of cells: `viewport(wb, &ViewportRequest, &mut CfCache, &dyn Measure) -> Viewport`, giving `CellView`s (span/merge, fill, data bar, icon, checkbox, picture, `CellText`, border segments, comment mark) plus sparklines and filter buttons. egui's `grid::paint_quadrant` now only places and draws what the model returns (pixel-identical to before on the sample workbooks and a stress sheet at 50/100/175%, frozen panes, Page Layout, right-to-left and Show Formulas). `print.rs` shares its `cell_look`. `display::formula_display` (Show Formulas in the UI's formula language) moved from `ui-egui` into the engine.
+- **MAC1.2 done.** `gridcraft_engine::selection_format::selection_format(wb, sheet, &Selection) -> SelectionFormat`, also the query command `selection.format` (JSON, `null` = mixed): the active cell's style (what toggles flip; `active_style` is shared by the engine's toggle commands and egui's ribbon), the cell count, and the selection's font, fill, alignment, number format (code + category), borders (outline, inside horizontal/vertical, diagonals; an edge counts when set on either neighbouring cell) and protection. It reports the cells' own formatting (what Format Cells edits), not table styles or conditional formats. Selections over 250,000 cells (or edges over 65,536 cells) are summarized from their distinct styles, so a whole-sheet selection stays instant.
 - Follow-up: the PDF printer still lays out its own text (overflow, wrapping) with PDF font metrics. It could use `viewport` with a PDF `Measure`.
 
 ## Decisions

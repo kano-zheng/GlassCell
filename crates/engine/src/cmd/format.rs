@@ -266,8 +266,8 @@ pub(crate) fn apply_style(s: &mut Session, p: &Json, f: impl Fn(&mut Style)) -> 
 /// The style of the active cell (what toggles read).
 pub(crate) fn active_style(s: &Session) -> Result<Style> {
     let d = s.doc()?;
-    let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
-    Ok(d.wb.styles.get(sh.style_id(d.selection.active)).clone())
+    d.wb.active().ok_or(EngineError::NoDocument)?;
+    Ok(crate::selection_format::active_style(&d.wb, d.wb.active_sheet, &d.selection))
 }
 
 fn toggle(s: &mut Session, p: &Json, get: fn(&Style) -> bool, set: fn(&mut Style, bool)) -> Result<Json> {
