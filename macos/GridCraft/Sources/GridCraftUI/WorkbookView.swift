@@ -9,6 +9,7 @@ public struct WorkbookView: View {
     @State private var frameTime: Double = 0
     @State private var editor: EditController
     @State private var form: PresentedForm?
+    @State private var dialog: DialogRequest?
 
     public init(document: SpreadsheetDocument) {
         self.document = document
@@ -29,6 +30,13 @@ public struct WorkbookView: View {
                 document.showInspector = true
             } else if let session = try? document.engine.openForm(name: name, params: params) {
                 form = PresentedForm(session: session)
+            } else if DialogRequest.handled.contains(name) {
+                dialog = DialogRequest(name: name, params: JSON.decode(params))
+            } else if name == "commandSearch" {
+                document.showPalette = true
+            } else if name == "insertPicture" {
+                let values = JSON.decode(params)
+                Task { @MainActor in insertPicture(document, params: values) }
             } else {
                 document.problem = "The “\(name)” dialog isn't in GridCraft for Mac yet."
             }
@@ -88,6 +96,9 @@ public struct WorkbookView: View {
             WorkbookToolbar(document: document, editor: editor, undoManager: undoManager)
         }
         .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
+        .sheet(item: $dialog) { request in
+            CustomDialog(request: request, document: document, editor: editor)
+        }
         .sheet(item: $form) { presented in
             FormSheet(form: presented.session, document: document)
         }

@@ -32,4 +32,22 @@ import Testing
             try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: dir).appendingPathComponent("form-\(name).png"))
         }
     }
+
+    @Test func writeDialogImages() throws {
+        guard let dir = ProcessInfo.processInfo.environment["GRIDCRAFT_SNAPSHOTS"] else { return }
+        let document = SpreadsheetDocument(sample: "sales")
+        document.run("formulas.defineName", ["name": "Totals", "refersTo": "=Sales!$G$5:$G$10"])
+        document.run("selection.set", ["range": "B4:G10"])
+        let editor = EditController(document: document)
+        for name in ["sort", "nameManager", "insertFunction", "statistics", "find"] {
+            let host = NSHostingView(rootView: CustomDialog(request: DialogRequest(name: name, params: [:]), document: document, editor: editor))
+            host.frame = NSRect(x: 0, y: 0, width: 680, height: 460)
+            let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: dir).appendingPathComponent("dialog-\(name).png"))
+        }
+    }
 }
