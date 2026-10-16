@@ -5,12 +5,15 @@ import SwiftUI
 /// A workbook window: the grid, with the sheet tabs below and the zoom in the toolbar.
 public struct WorkbookView: View {
     @ObservedObject var document: SpreadsheetDocument
+    /// Where the workbook is saved (`nil` until it is): sharing names it, Spotlight indexes it.
+    let fileURL: URL?
     @Environment(\.undoManager) private var undoManager
     @State private var frameTime: Double = 0
     @State private var editor: EditController
 
-    public init(document: SpreadsheetDocument) {
+    public init(document: SpreadsheetDocument, fileURL: URL? = nil) {
         self.document = document
+        self.fileURL = fileURL
         _editor = State(initialValue: EditController(document: document))
     }
 
@@ -61,7 +64,7 @@ public struct WorkbookView: View {
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
         }
         .toolbar(id: "gridcraft.workbook") {
-            WorkbookToolbar(document: document, editor: editor, undoManager: undoManager)
+            WorkbookToolbar(document: document, editor: editor, undoManager: undoManager, fileURL: fileURL)
         }
         .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
         .sheet(item: $document.dialog) { request in
@@ -91,6 +94,9 @@ public struct WorkbookView: View {
             }
         }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { document.undoManager = undoManager }
+        // Spotlight indexes the workbook when it opens or gets a new file, and as it closes.
+        .task(id: fileURL) { WorkbookSpotlight.index(document, fileURL: fileURL) }
+        .onDisappear { WorkbookSpotlight.index(document, fileURL: fileURL) }
         .alert("GridCraft", isPresented: Binding(get: { document.problem != nil }, set: { if !$0 { document.problem = nil } })) {
             Button("OK") { document.problem = nil }
         } message: {

@@ -174,3 +174,17 @@ fn cell_names_parse_back() {
     assert!(parse_cell("not a cell".into()).is_none());
     assert!(parse_cell("".into()).is_none());
 }
+
+#[test]
+fn the_search_summary_lists_labels_and_capped_text() {
+    let e = engine();
+    e.execute("file.new".into(), r#"{"sample": "sales"}"#.into()).unwrap();
+    let full = e.search_summary(100_000).unwrap();
+    assert_eq!(full.sheets, vec!["Sales".to_string()]);
+    assert!(full.tables.contains(&"Sales".to_string()));
+    assert!(full.text.contains("Quarterly Sales Dashboard"));
+    assert!(full.text.contains("North"));
+    let short = e.search_summary(40).unwrap();
+    assert!(short.text.chars().count() <= 40);
+    assert!(e.search_summary(0).unwrap().text.is_empty());
+}

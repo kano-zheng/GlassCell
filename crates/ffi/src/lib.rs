@@ -278,6 +278,50 @@ impl Engine {
         })
     }
 
+    /// The workbook for Spotlight: labels, and up to `max_chars` characters of cell text.
+    pub fn search_summary(&self, max_chars: u32) -> Result<SearchSummary, FfiError> {
+        guard(|| {
+            let (wb, _) = self.workbook()?;
+            let cap = max_chars as usize;
+            let mut text = String::new();
+            let mut chars = 0usize;
+            'sheets: for sh in &wb.sheets {
+                let Some(used) = sh.used_range() else { continue };
+                let mut row = None;
+                for (c, _) in sh.cells.iter_range(used) {
+                    let shown = gridcraft_engine::display::cell_text(&wb, sh, c);
+                    let shown = shown.trim();
+                    if shown.is_empty() {
+                        continue;
+                    }
+                    let sep = match row {
+                        None => "",
+                        Some(r) if r == c.row => "\t",
+                        Some(_) => "\n",
+                    };
+                    row = Some(c.row);
+                    let n = sep.len() + shown.chars().count();
+                    if chars.saturating_add(n) > cap {
+                        break 'sheets;
+                    }
+                    text.push_str(sep);
+                    text.push_str(shown);
+                    chars += n;
+                }
+                if chars < cap && !text.is_empty() {
+                    text.push('\n');
+                    chars += 1;
+                }
+            }
+            Ok(SearchSummary {
+                sheets: wb.sheets.iter().map(|s| s.name.clone()).collect(),
+                tables: wb.sheets.iter().flat_map(|s| s.tables.iter().map(|t| t.name.clone())).collect(),
+                names: wb.names.iter().map(|n| n.name.clone()).collect(),
+                text,
+            })
+        })
+    }
+
     /// Lays out a block of cells of the active workbook for drawing.
     pub fn viewport(&self, request: ViewportQuery, measurer: Arc<dyn TextMeasurer>) -> Result<Viewport, FfiError> {
         guard(|| {

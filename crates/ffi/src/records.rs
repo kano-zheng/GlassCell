@@ -637,6 +637,17 @@ pub struct SelectionState {
     pub ranges: Vec<CellRange>,
 }
 
+/// What Spotlight indexes for a workbook: its sheet, table and name labels, and its cells'
+/// displayed text (capped).
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SearchSummary {
+    pub sheets: Vec<String>,
+    pub tables: Vec<String>,
+    pub names: Vec<String>,
+    /// Cell texts, a tab between cells and a line per row, sheet after sheet.
+    pub text: String,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct SheetInfo {
     pub index: u32,

@@ -9,6 +9,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
     @ObservedObject var document: SpreadsheetDocument
     let editor: EditController
     let undoManager: UndoManager?
+    let fileURL: URL?
 
     private var format: SelectionFormat? {
         _ = document.generation
@@ -171,6 +172,13 @@ struct WorkbookToolbar: CustomizableToolbarContent {
                 if let percent = Int(title.dropLast()) { run("view.zoom", ["percent": percent]) }
             }
             .help("Zoom")
+        }
+        ToolbarItem(id: "share") {
+            let shared = SharedWorkbook(document: document, fileURL: fileURL)
+            ShareLink(item: shared, preview: SharePreview(shared.name)) {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .help("Share")
         }
         ToolbarItem(id: "inspector") {
             Button("Inspector", systemImage: "sidebar.trailing") { document.showInspector.toggle() }
