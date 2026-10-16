@@ -1,0 +1,78 @@
+# GridCraft for Mac: SwiftUI frontend
+
+Last updated: 2026-10-17
+
+A native macOS frontend in SwiftUI over GridCraft's Rust engine, in a fork of `storytold/gridcraft`. The egui frontend stays in the tree as the behaviour reference.
+
+## Status
+
+**Phase 0: not started.** The fork has been created; the agent instructions have been rewritten for it. Next task: **MAC1.1**.
+
+## Decisions
+
+| Date | Decision | Why |
+|---|---|---|
+| 2026-10-17 | Fork, not upstream | Upstream requires Rust-only, all-platform UI. A Swift frontend can't live there. |
+| 2026-10-17 | Toolbar + inspector + menu bar; no ribbon, no keytips | Native Mac conventions. |
+| 2026-10-17 | UniFFI bridge crate `crates/ffi` (L6); the only crate allowed generated `unsafe` | Typed Swift bindings without handwritten C ABI. The JSON control channel is too slow for the grid. |
+| 2026-10-17 | Grid = custom AppKit view via `NSViewRepresentable` | SwiftUI `Table`/`LazyVGrid` can't handle 1,048,576 × 16,384 cells, frozen panes or 120 fps scrolling. |
+| 2026-10-17 | Cell appearance and editing rules move into the engine as read models | Avoids two diverging copies (egui and Swift) of Excel behaviour. |
+| 2026-10-17 | SF Symbols allowed through the system API only | Native look; nothing vendor-owned is committed. |
+| 2026-10-17 | Swift app lives in `macos/`, not `apps/` | `apps/*` are Cargo workspace members. |
+
+## Phases
+
+### MAC1: engine read models (Rust; egui switches to them too)
+- **MAC1.1** Viewport read model: for a sheet and a row/column window, every visible cell's final text, font, colours, alignment, borders, overflow extent, merge, and conditional-format decorations (data bars, icons). Today this lives in `crates/ui-egui/src/grid.rs` (`look`, `display_text`, `merged_edges`, `center_across_end`, `shrink_font`); move it into `crates/engine`, and make `grid.rs` consume it.
+- **MAC1.2** `selection.format` query: the selection's resolved font, fill, alignment, number format and borders, with a "mixed" state when cells differ. This is what the inspector and toolbar show.
+- **MAC1.3** Move the business logic in `crates/ui-egui/src/lib.rs` (`SheetApp`) into the engine: validation on commit, cut-pastes-once clipboard semantics, AutoSave policy, `store_view_state`, the open-warning notice, and the Name Box text.
+- **MAC1.4** Geometry queries for the grid: row/column positions and sizes, hidden/frozen ranges, and hit-testing (point → cell, header edge, fill handle, object).
+
+### MAC2: bridge
+- **MAC2.1** `crates/ffi` with UniFFI: `Session` handle, `execute(id, json) -> json`, `take_ui_requests()`, `commands()`, and the read models from MAC1. Panics are caught at the boundary.
+- **MAC2.2** Build an XCFramework (arm64 + x86_64) and Swift Package `macos/GridCraftEngine`; script it (`cargo xtask mac-framework` or a shell script).
+
+### MAC3: spike: read-only document
+- **MAC3.1** `DocumentGroup` app opening `.xlsx`/`.csv` through the engine, with a sample workbook from `crates/engine/src/sample.rs`.
+- **MAC3.2** Grid `NSView`: headers, gridlines, cell text through Core Text, scrolling, zoom, frozen panes. Measure frame time on a 100k-row sheet.
+
+### MAC4: editing
+Selection (mouse and keyboard), in-cell editor (`NSTextView`, IME, formula point mode, autocomplete, localized formulas), formula bar, Name Box, fill handle, resizing rows and columns, undo/redo via the engine's history, system clipboard (plain text + HTML).
+
+### MAC5: toolbar, inspector, menus
+Toolbar, the inspector panes, the menu bar generated from the engine catalog plus the Mac placement table, the command palette, and context menus.
+
+### MAC6: dialogs
+Port the engine's dialogs (`UiRequest::Dialog` names in `crates/ui-egui/src/dialogs.rs`, about 60) to SwiftUI sheets, or to inspector pages where they fit.
+
+### MAC7: objects and output
+Charts (paint `gridcraft-chart` `Prim`s with Core Graphics), pictures, shapes, text boxes, sparklines, Page Layout view, printing (`NSPrintOperation` over the engine's PDF), export.
+
+### MAC8: platform
+App Intents for engine commands (Shortcuts, Siri, Apple Intelligence), the control channel for agents, String Catalogs (generated from `crates/ui-egui/src/i18n/*`), Quick Look preview, Spotlight, and sharing.
+
+## Toolbar + inspector design
+
+Placement of the Excel ribbon groups (engine catalog `menu` paths) in the Mac UI.
+
+**Toolbar** (customizable, `.toolbar(id:)`): Undo/Redo, Format Painter · Font, Size, Bold/Italic/Underline, Font Colour, Fill · Alignment (segmented), Merge, Borders menu · Number Format menu (Currency, Percent, Comma, ± decimals) · AutoSum, Sort & Filter · Insert menu (Chart, Table, PivotTable, Picture, Shape, Link, Comment) · Zoom · Inspector toggle.
+
+**Inspector** (`.inspector`, panes follow the selection):
+
+| Pane | Replaces | Shown |
+|---|---|---|
+| Cell: Font, Alignment, Number, Border, Fill, Protection | Home ▸ Font / Alignment / Number; Format Cells dialog | Always |
+| Table | Table Design ▸ Style Options / Styles / Properties | Selection in a table |
+| Chart | Chart Design ▸ Type / Layouts / Data; Format ▸ Shape Styles | Chart selected |
+| PivotTable | Field list (`pivot_pane.rs`); PivotTable Analyze / Design | Selection in a pivot |
+| Sheet | Page Layout ▸ Page Setup / Sheet Options / Themes; View ▸ Show | Always |
+| Data | Data Validation, Conditional Formatting rules, Outline | Always |
+
+Comments and notes get their own sidebar.
+
+**Menu bar**: File, Edit, View, Insert, Format, Formulas, Data, Review, Window, Help. Built from the engine catalog (`menu[0]` → menu, `menu[1]` → section), re-mapped by the Swift placement table where Mac conventions differ (e.g. Page Setup under File). Everything else lives here: Formulas ▸ Auditing, Review ▸ Proofing / Protect, Data Tools, View ▸ Window, Automate. A command palette (⌘⇧P, the engine's `commandSearch`) reaches every command.
+
+## Open questions
+- Minimum macOS version: 26, or 27 only?
+- Distribution: Mac App Store (sandbox, entitlements) or notarized direct download?
+- Fork name and branding (replace the ArtCraft brand files before distributing).

@@ -1,53 +1,70 @@
-# GridCraft — instructions for agents
+# GridCraft for Mac — instructions for agents
 
-GridCraft is a clean-room, open-source, Rust-native spreadsheet targeting Microsoft Excel parity — and superiority (speed, openness, agent control). It runs natively on macOS, Windows, Linux and BSD, and on the web via WASM. Siblings with the same conventions: `../designcraft` (InDesign-class, the closest reference), `../photocraft` (Photoshop), `../vectorcraft` (Illustrator), `../pdfcraft` (Acrobat), `../filmcraft` (Premiere), `../lightcraft` (Lightroom), `../effectcraft` (After Effects).
+This repository is a **fork** of [GridCraft](https://github.com/storytold/gridcraft), the clean-room, open-source, Rust-native spreadsheet targeting Microsoft Excel parity. The fork keeps GridCraft's Rust engine and adds a **native macOS frontend written in SwiftUI** (macOS 26+, adopting the newest SwiftUI/AppKit features), with a Mac-style **toolbar + inspector + menu bar** instead of Excel's ribbon.
 
-Standards and learnings shared across the crafting apps live in `../../craftrules` (checked out next to the craft apps, or `storytold/craftrules`). Read its `AGENTS.md` at the start of a session, follow its standards, and contribute reusable learnings back there. Never code: repos don't share code.
+- The Rust engine (`crates/*` below L6) is shared with upstream. The egui frontend (`crates/ui-egui`, `apps/gridcraft`, `apps/gridcraft-web`) stays in the tree as the behaviour reference and must keep building, so merges from upstream stay cheap.
+- Remote `upstream` = `storytold/gridcraft` (fetch only; pushing to it is disabled). Sync with `git fetch upstream && git merge upstream/main`. Keep edits to upstream-owned files small and focused so merges stay easy.
+- Standards shared across the crafting apps live in `../../craftrules` (or `storytold/craftrules`); its never-crash, fonts and test-corpora standards still apply to the Rust side.
 
 ## Start every session here
-1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md` and the relevant `plan/architecture.md` section. Behaviour reference: `plan/excel/*.md` (`observed-ui.md` holds measured observations of the running app).
-2. Follow the autonomous operation protocol (`plan/execution-plan.md` §7). Don't stop to ask unless §7 lists the decision as the user's.
+1. Read [`docs/mac-port.md`](docs/mac-port.md): the plan, the current phase, and the toolbar/inspector design.
+2. For engine behaviour, read the upstream docs in `docs/` (`architecture.md`, `control-protocol.md`, the parity checklists). `plan/` (gitignored, local only) may hold Excel observations if it exists.
 
-`plan/` is gitignored (local only).
+## Repository layout (fork additions)
+- `crates/ffi` (`gridcraft-ffi`, L6): the UniFFI bridge from Swift to `gridcraft-engine`. It is the **only** crate allowed to opt out of `forbid(unsafe_code)`, and only for code UniFFI generates; no handwritten `unsafe`. It exposes a coarse API: execute a command (`id` + JSON params → JSON), drain UI requests, list commands, and typed read models (viewport, selection format).
+- `macos/`: the SwiftUI app (Swift Package / Xcode project) and its tests. It is **not** under `apps/`, because `apps/*` are Cargo workspace members.
+- Register new crates in `xtask/src/layers.rs` so `cargo xtask layers` classifies them.
 
 ## Assets and iconography — absolute rule
-**No Microsoft, Adobe, Avid, Autodesk (or any other vendor's) iconography, images, artwork, fonts, templates, themes or sample files — ever.** This is the most important rule in this repository; breaking it is a serious failure.
-- Every asset in the repo is original work by GridCraft contributors, or public domain / CC0, or open source / Creative Commons that allows redistribution (or licensed open source by the contributor who created it).
-- Every asset file has a row in [`ATTRIBUTION.md`](ATTRIBUTION.md) (author, source, licence). `cargo xtask assets` enforces it. Adding an asset without a row is a bug.
-- Prefer art generated in code: the UI icon set (`crates/ui-egui/src/icons.rs`), table and cell style palettes, themes and sample workbooks are drawn/defined in code and original.
+**No Microsoft, Adobe, Avid, Autodesk (or any other vendor's) iconography, images, artwork, fonts, templates, themes or sample files are committed — ever.** Breaking this rule is a serious failure.
+- Every asset in the repo is original work, or public domain / CC0, or open source / Creative Commons that allows redistribution. Every asset file has a row in [`ATTRIBUTION.md`](ATTRIBUTION.md); `cargo xtask assets` enforces it.
+- **SF Symbols are allowed in the Mac frontend, only through the system API** (`Image(systemName:)`, `Label(_:systemImage:)`). Never export, trace or commit symbol artwork as files, and never use symbols to imitate Office's look. Where no fitting symbol exists, draw the icon in code (port it from `crates/ui-egui/src/icons.rs`).
 - Never copy Office's icons, ribbon artwork, theme XML, table-style definitions, templates, clip art or wording beyond feature names. Excel feature *names* (menu labels, function names) are fine.
-- Screenshots of Microsoft software are never committed (they live only in `plan/excel/screenshots/`).
-- The ArtCraft brand files in `docs/brand/` are ArtCraft trademarks under `docs/brand/LICENSE-brand.txt`, the one exception.
+- Screenshots of Microsoft software are never committed.
+- The ArtCraft brand files in `docs/brand/` are ArtCraft trademarks under `docs/brand/LICENSE-brand.txt`. Before distributing the fork, replace them with the fork's own branding.
 
 ## Never crash
-People trust GridCraft with their numbers; a crash loses their work. **This outranks feature work.** Standard: [`craftrules/standards/never-crash.md`](https://github.com/storytold/craftrules/blob/main/standards/never-crash.md).
+People trust GridCraft with their numbers; a crash loses their work. **This outranks feature work**, in Rust and in Swift.
+
+Rust (engine and every crate except the generated parts of `crates/ffi`):
 - **No panics in non-test code:** no `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`; no `unsafe` (`unsafe_code = "forbid"`).
 - **Errors are `Result<T, E>`** through the crate's error type and `?`.
-- **Input-derived numbers are hostile** (files, formulas, commands, MCP/control params): `get()` instead of indexing, checked/saturating arithmetic, cap input-sized allocations (huge ranges, `REPT`, `SEQUENCE`, whole-column references).
+- **Input-derived numbers are hostile** (files, formulas, commands, MCP/control/FFI params): `get()` instead of indexing, checked/saturating arithmetic, cap input-sized allocations.
 - **Bound recursion** (formula nesting, dependency chains, names referring to names).
-- **Last-resort guard:** `Session::execute` catches escaped panics and restores the workbook. It's a safety net, not a licence.
-- **Prove it:** every crash fix lands with a regression test (`tests::every_command_survives_empty_params` fuzzes every command; `crates/engine/tests/command_sequence_fuzz.rs` fuzzes random command sequences against undo/redo, XLSX round-trip and full-recalc invariants; soak it with `GRIDCRAFT_FUZZ_SEEDS`/`GRIDCRAFT_FUZZ_STEPS`, replay with `GRIDCRAFT_FUZZ_SEED`).
+- **Last-resort guard:** `Session::execute` catches escaped panics and restores the workbook. The FFI layer must also catch panics so that none ever unwinds into Swift.
+- **Prove it:** every crash fix lands with a regression test (`tests::every_command_survives_empty_params`, `crates/engine/tests/command_sequence_fuzz.rs`).
 - Crates carry `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`.
 
-## Non-negotiables
-- **Clean-room.** Microsoft Excel is installed on the dev machine and may be *observed* black-box: run it, use its UI with synthetic workbooks, take screenshots (by window id) stored only under `plan/excel/screenshots/`. Never read, disassemble or copy anything inside the Office bundle, never commit files produced by Excel, never copy GPL/AGPL/LGPL code (LibreOffice, Gnumeric…). Function behaviour comes from public documentation and observation.
-- **Fonts live in [`storytold/craft-fonts`](https://github.com/storytold/craft-fonts)**, never in this repo. It is an optional build input (`CRAFT_FONTS_DIR`); without it the app uses system fonts and egui's defaults. Standard: craftrules `standards/fonts.md`.
-- **Test corpora** (real Excel-authored files) live in a separate corpus repo, fetched pinned and sha256-verified (craftrules `standards/test-corpora.md`). Never commit large binary fixtures; build test workbooks in code.
-- **Everything is a command.** User-visible behaviour = a command in `crates/engine/src/cmd/*` (id, label, ribbon path, shortcut, params doc, `enabled`, `run`) + tests. Ids follow Excel's ribbon (`home.bold`, `insert.chart`, `data.sortAscending`) plus primitives (`cell.set`, `selection.set`, `range.setValues`). UI-only commands live in `crates/ui-egui`. The control channel, CLI and MCP reach all of them.
-- **Programmatic calls never open dialogs**: a command with empty params runs with defaults or returns an error; only menu-style invocation opens a dialog (`UiRequest::Dialog`).
-- **Layering** is enforced by `cargo xtask layers`: `core`/`numfmt` (L0) → `formula`/`functions` (L1) → `model`/`calc`/`xlsx` (L2) → `chart` (L3) → `engine` (L5) → `ui-egui`/`mcp` (L6) → `apps/*` (L7). Nothing below L6 depends on egui/eframe/winit/rfd. **The UI crate is swappable.**
-- **The UI is thin**: panels read engine state and act through `app.run(id, params)`. Colours come from `theme::Tokens`.
-- **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
-- **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy -D warnings, tests, assets, layers, wasm). One task id per commit (`M2.1: borders gallery`).
+Swift (`macos/`):
+- No force unwraps (`!`), `try!`, `as!`, `fatalError`, `preconditionFailure` or `precondition` in non-test code. Errors from the engine are thrown and shown to the user, never ignored.
+- Swift 6 language mode with strict concurrency. The engine `Session` is owned by one actor (or one `@MainActor` model); never touch it from two threads.
 
-## Running and looking at the app
-- `cargo run --release -p gridcraft -- --sample sales --control 7979` (sample workbook + control channel).
-- Drive it: JSON lines on `127.0.0.1:7979`, e.g. `{"id":1,"method":"engine.execute","params":{"command":"cell.set","params":{"cell":"B2","input":"=SUM(A1:A9)"}}}` then `{"id":2,"method":"ui.screenshot","params":{"path":"/tmp/shot.png"}}`. Methods: `crates/ui-egui/src/control.rs`, docs: `docs/control-protocol.md`.
-- **Offscreen UI render** (no window, from a source checkout): `cargo run -p gridcraft-ui-egui --example snapshot -- --sample sales out.png`.
+## Non-negotiables
+- **Clean-room.** Microsoft Excel may be *observed* black-box only. Never read, disassemble or copy anything inside the Office bundle, never commit files produced by Excel, never copy GPL/AGPL/LGPL code (LibreOffice, Gnumeric…).
+- **Fonts live in [`storytold/craft-fonts`](https://github.com/storytold/craft-fonts)**, never in this repo. The Mac app uses system fonts through Core Text.
+- **Test corpora** live in a separate corpus repo; never commit large binary fixtures; build test workbooks in code.
+- **Everything is a command.** User-visible behaviour = a command in `crates/engine/src/cmd/*` (id, label, ribbon path, shortcut, params doc, `enabled`, `run`) + tests. The Swift UI acts only through `execute(id, params)`; it never mutates the workbook any other way. Mac-only UI commands (inspector, toolbar state) are defined in Swift and are still reachable by the control channel and App Intents.
+- **Programmatic calls never open dialogs**: a command with empty params runs with defaults or returns an error; only menu-style invocation opens a dialog (`UiRequest::Dialog`), which Swift presents as a sheet or inspector page.
+- **Logic lives in the engine, not in a frontend.** The Swift side does not reimplement cell appearance (number formats, conditional formats, overflow, merges, borders) or editing rules. If Swift needs something only egui knows today, move it into the engine as a read model first, and have egui use it too.
+- **Layering** is enforced by `cargo xtask layers`: `core`/`numfmt` (L0) → `formula`/`functions` (L1) → `model`/`calc`/`xlsx` (L2) → `chart` (L3) → `engine` (L5) → `ui-egui`/`mcp`/`ffi` (L6) → `apps/*` (L7). Nothing below L6 depends on a UI toolkit or on FFI.
+- **Languages:** Rust for the engine and bridge, Swift for `macos/`. No handwritten JS/TS. The engine must keep compiling to wasm (`cargo xtask wasm`), which keeps upstream merges clean.
+- **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy -D warnings, tests, assets, layers, wasm), plus the Swift build and tests once `macos/` exists (`swift build` / `swift test`, or `xcodebuild test`). One task id per commit (`MAC1.2: viewport read model`).
+
+## Mac UI direction
+- **Toolbar + inspector + menu bar, no ribbon, no keytips.** Common actions live in a customizable toolbar (`.toolbar(id:)`). Formatting and object properties live in a context-sensitive `.inspector`. Every command is reachable from the menu bar and a command palette (⌘⇧P). The full mapping is in `docs/mac-port.md`.
+- The engine catalog's `menu` paths stay Excel-ribbon paths (upstream-owned). The Mac placement of each command is a separate table on the Swift side.
+- **The grid is a custom AppKit view** (`NSViewRepresentable`, Core Text, tiled/layer-backed drawing) fed by the engine's viewport read model. Do not use SwiftUI `Table`/`LazyVGrid` for it. SwiftUI owns the window chrome, toolbar, inspector, sheets and dialogs.
+- Use the platform: `DocumentGroup` (windows, versions, autosave), `@Observable`, App Intents (commands exposed to Shortcuts, Siri and Apple Intelligence), `NSPrintOperation` over the engine's PDF, String Catalogs for localization. Check the current SDK documentation before relying on an API introduced in macOS 26/27.
+- Colours come from the system (semantic colours, accent colour) unless a cell or chart defines them.
+- **For UI work, look at the result:** run the app and screenshot it, and compare behaviour with the egui frontend.
+
+## Running
+- Mac app: see `macos/README.md` once it exists.
+- egui reference app: `cargo run --release -p gridcraft -- --sample sales --control 7979`. Drive it with JSON lines on `127.0.0.1:7979` (methods: `crates/ui-egui/src/control.rs`, docs: `docs/control-protocol.md`).
+- Offscreen egui render: `cargo run -p gridcraft-ui-egui --example snapshot -- --sample sales out.png`.
 - Headless: `gridcraft-cli eval '=SUM(1,2,3)'`, `gridcraft-cli run --in book.xlsx --cmd 'home.bold={"range":"A1:C1"}' --out book.xlsx`, `gridcraft-cli mcp`.
-- **For UI work, look at the result** (snapshot PNG) and compare with `plan/excel/observed-ui.md`.
-- Shell gotcha: `mv`/`cp` are aliased interactive here — use `/bin/mv -f` / `/bin/cp -f`. macOS has no `timeout`; use `perl -e 'alarm 60; exec @ARGV' cmd`.
+- Shell gotcha: `mv`/`cp` are aliased interactive here, so use `/bin/mv -f` / `/bin/cp -f`. macOS has no `timeout`; use `perl -e 'alarm 60; exec @ARGV' cmd`.
 - Parallel agents: separate `CARGO_TARGET_DIR` per agent; edit only the crates you own; delete your target dir when done.
 
 ## Roadmap
-`ROADMAP.md` (committed) is the one-page summary: stage, headline numbers, dimensions, languages, progress log. It follows craftrules `standards/progress-docs.md` and points at the detail in `docs/`: `target-app-parity.md` (authoritative assessment), `gaps.md` (ranked work list: pick from it), `roadmap.md` (current focus, beta gates, milestones), `architecture.md`, and the area checklists `function-parity.md`, `chart-parity.md`, `file-format-parity.md`, `ui-parity.md`, `hardware-parity.md`, `localization-parity.md`. Update the affected docs (and their timestamp lines and revision history) whenever work lands. `cargo xtask parity` regenerates `docs/parity-checklist.md` from `crates/engine/src/catalog.rs`.
+`docs/mac-port.md` tracks the Mac frontend: phases, status and design decisions. Update it whenever work lands. The upstream progress docs (`ROADMAP.md`, `docs/roadmap.md`, `docs/gaps.md`, the parity checklists) describe the shared engine; update them only for engine work.
