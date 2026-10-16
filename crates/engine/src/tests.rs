@@ -3305,3 +3305,57 @@ fn an_existing_spill_keeps_its_area_through_a_full_recalc_and_a_reload() {
         assert_eq!(sh.value(CellRef::parse("F13").unwrap()), Value::Error(gridcraft_core::CellError::Spill));
     }
 }
+
+#[test]
+fn edit_commit_applies_the_entry_locale_and_data_validation() {
+    let mut s = s();
+    // Spanish formula syntax becomes canonical English.
+    let r = s.execute("edit.commit", json!({"cell": "A1", "input": "=SUMA(1;2)", "locale": "es"})).unwrap();
+    assert_eq!(r["committed"], true);
+    assert_eq!(s.execute("cell.get", json!({"cell": "A1"})).unwrap()["formula"], "=SUM(1,2)");
+    assert_eq!(v(&s, "A1"), Value::Number(3.0));
+    // One undo step, labelled like typing into the cell.
+    assert_eq!(s.execute("history.list", json!({})).unwrap()["undo"][0], "Enter Cell");
+    // A Stop rule rejects the entry and says why.
+    s.execute("data.validation", json!({"range": "B1", "type": "whole", "operator": "greater", "formula1": "0"})).unwrap();
+    let r = s.execute("edit.commit", json!({"cell": "B1", "input": "-5"})).unwrap();
+    assert_eq!(r["committed"], false);
+    assert_eq!(r["validation"]["style"], "stop");
+    assert_eq!(v(&s, "B1"), Value::Empty);
+    assert_eq!(s.execute("edit.commit", json!({"cell": "B1", "input": "5"})).unwrap()["validation"], serde_json::Value::Null);
+    // A Warning rule enters it and passes the message on.
+    s.execute("data.validation", json!({"range": "B2", "type": "whole", "operator": "greater", "formula1": "0", "errorStyle": "warning"})).unwrap();
+    let r = s.execute("edit.commit", json!({"cell": "B2", "input": "-5"})).unwrap();
+    assert_eq!((r["committed"].clone(), r["validation"]["style"].clone()), (json!(true), json!("warning")));
+    assert_eq!(v(&s, "B2"), Value::Number(-5.0));
+    // Fill: every selected cell, relative references adjusting.
+    s.execute("selection.set", json!({"range": "C1:C3"})).unwrap();
+    s.execute("edit.commit", json!({"input": "=ROW()", "fill": true})).unwrap();
+    assert_eq!(v(&s, "C3"), Value::Number(3.0));
+}
+
+#[test]
+fn the_name_box_shows_a_matching_name_or_the_active_cell() {
+    use crate::selection::name_box_text;
+    let mut s = s();
+    s.execute("formulas.defineName", json!({"name": "Block", "refersTo": "=Sheet1!$B$2:$C$4"})).unwrap();
+    s.execute("selection.set", json!({"range": "B2:C4", "active": "B2"})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!(name_box_text(&d.wb, &d.selection, false), "Block");
+    s.execute("selection.set", json!({"range": "B2:C5", "active": "B2"})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!(name_box_text(&d.wb, &d.selection, false), "B2");
+    assert_eq!(name_box_text(&d.wb, &d.selection, true), "4R x 2C");
+}
+
+#[test]
+fn autosave_is_due_for_a_changed_workbook_with_an_xlsx_file() {
+    let mut s = s();
+    assert!(!s.doc().unwrap().autosave_due(), "no file yet");
+    s.active_mut().unwrap().path = Some("/tmp/book.xlsx".into());
+    assert!(!s.doc().unwrap().autosave_due(), "unchanged");
+    s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    assert!(s.doc().unwrap().autosave_due());
+    s.active_mut().unwrap().path = Some("/tmp/book.csv".into());
+    assert!(!s.doc().unwrap().autosave_due(), "CSV loses formatting: never autosaved");
+}

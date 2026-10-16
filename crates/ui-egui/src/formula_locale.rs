@@ -1,57 +1,10 @@
 //! UI formula syntax boundary. Engine commands, control/API callers and XLSX keep English.
-use gridcraft_engine::formula::{self, FormulaLocale, ParseError};
+use gridcraft_engine::formula::FormulaLocale;
 use gridcraft_engine::model::Workbook;
 
-pub(crate) fn canonical(
-    text: &str,
-    locale: FormulaLocale,
-    wb: &Workbook,
-    sheet: usize,
-    cell: gridcraft_engine::core::CellRef,
-) -> Result<String, ParseError> {
-    // The editor hid the `_xludf.` prefixes of this cell's formula; confirming it unchanged keeps
-    // the user-defined calls instead of binding them to the built-ins of the same name.
-    if let Some(stored) = wb.sheet(sheet).and_then(|sh| sh.cell(cell)).filter(|c| c.formula.is_some()).map(|c| c.input_text())
-        && has_udf_prefix(&stored)
-        && text == display(&stored, locale, wb, sheet)
-    {
-        return Ok(stored);
-    }
-    if locale == FormulaLocale::En || wb.sheet(sheet).is_some_and(|sh| wb.styles.get(sh.style_id(cell)).num_fmt.as_str() == "@") {
-        return Ok(text.to_string());
-    }
-    // Same formula detection as the engine's `input_to_cell` (no trimming: " =1" is text).
-    let body = text;
-    if body.starts_with('=')
-        || ((body.starts_with('+') || body.starts_with('-')) && body.chars().nth(1).is_some_and(|c| c.is_ascii_alphabetic() || c == '('))
-    {
-        let known = |name: &str| wb.name(name, sheet).is_some() || wb.table(name).is_some();
-        // Match the engine's existing convenience for missing closing parentheses.
-        let mut body = body.to_string();
-        let mut expr = formula::parse_input(&body, locale, known);
-        for _ in 0..8 {
-            if expr.is_ok() {
-                break;
-            }
-            body.push(')');
-            expr = formula::parse_input(&body, locale, known);
-        }
-        return Ok(format!("={}", formula::print(&expr?)));
-    }
-    // Decimal-comma number entry follows the same preference, without rewriting text or dates.
-    let normalized = body.trim().replace(locale.decimal_separator(), ".");
-    let number = normalized.strip_suffix('%').unwrap_or(&normalized);
-    if number.parse::<f64>().is_ok_and(f64::is_finite) {
-        return Ok(normalized);
-    }
-    Ok(text.to_string())
-}
-
 pub(crate) fn display(text: &str, locale: FormulaLocale, wb: &Workbook, sheet: usize) -> String {
-    gridcraft_engine::display::formula_display(text, locale, wb, sheet)
+    gridcraft_engine::formula_locale::display(text, locale, wb, sheet)
 }
-
-use gridcraft_engine::display::has_udf_prefix;
 
 // Descriptions/signatures for the supported Spanish function table; untranslated functions
 // retain their English help. Parameter punctuation follows the same locale as entry.
@@ -88,20 +41,10 @@ pub(crate) fn description(name: &str, locale: FormulaLocale) -> Option<String> {
     crate::formula_bar::function_description(canonical)
 }
 
-/// Avoid suggesting an alias that would call a workbook/table name instead of the function.
 pub(crate) fn completion_name<'a>(name: &'a str, locale: FormulaLocale, wb: &Workbook, sheet: usize) -> &'a str {
-    let alias = locale.function_name(name);
-    if wb.name(alias, sheet).is_some() || wb.table(alias).is_some() { name } else { alias }
+    gridcraft_engine::formula_locale::completion_name(name, locale, wb, sheet)
 }
 
-/// Engine-generated edit templates use canonical syntax. The only incomplete template is
-/// the bare function opening emitted by Insert Function; typed user input never enters here.
 pub(crate) fn display_template(text: &str, locale: FormulaLocale, wb: &Workbook, sheet: usize) -> String {
-    if let Some(name) = text.strip_prefix('=').and_then(|s| s.strip_suffix('('))
-        && !name.is_empty()
-        && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '.'))
-    {
-        return format!("={}(", completion_name(name, locale, wb, sheet));
-    }
-    display(text, locale, wb, sheet)
+    gridcraft_engine::formula_locale::display_template(text, locale, wb, sheet)
 }

@@ -36,7 +36,7 @@ pub mod widgets;
 
 use std::collections::HashMap;
 
-use gridcraft_engine::core::{CellRef, RangeRef};
+use gridcraft_engine::core::CellRef;
 use gridcraft_engine::{Session, UiRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
@@ -144,22 +144,7 @@ pub struct SheetView {
     pub scroll: egui::Vec2,
 }
 
-/// Severity of a notice shown in the info bar under the ribbon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NoticeKind {
-    Info,
-    Warning,
-}
-
-/// A dismissible bar under the ribbon, in the spirit of Excel's message bar. Used to tell the
-/// user what an opened file carried that GridCraft handled differently (e.g. preserved macros).
-#[derive(Clone, Debug, PartialEq)]
-pub struct Notice {
-    pub text: String,
-    pub kind: NoticeKind,
-    /// Optional button: `(label, dialog name)` — opens that dialog when clicked.
-    pub action: Option<(String, String)>,
-}
+pub use gridcraft_engine::notice::{Notice, NoticeKind};
 
 /// Host services the platform shell provides (file pickers, opening URLs).
 #[derive(Default)]
@@ -254,14 +239,6 @@ pub struct SheetApp {
     pub(crate) shots: control::Shots,
     /// Chart selected on the sheet (id).
     pub selected_chart: Option<u32>,
-    /// The system clipboard's text when GridCraft last copied without publishing to it (a
-    /// control-channel or MCP `edit.copy`/`edit.cut`). While the system clipboard still holds this
-    /// text, GridCraft's copy is the newer one and Paste uses it.
-    clipboard_text_at_copy: Option<String>,
-    /// The system clipboard's text right after GridCraft's last cut (the published text, or the
-    /// text noted for an unpublished cut); `None` after a copy, or once the clipboard is seen
-    /// holding other text. Once the cut has been pasted, Paste leaves this text alone.
-    cut_text: Option<String>,
     pub started: f64,
 }
 
@@ -303,8 +280,6 @@ impl SheetApp {
             keytips: keytips::KeyTips::default(),
             shots: control::Shots::default(),
             selected_chart: None,
-            clipboard_text_at_copy: None,
-            cut_text: None,
             started: now_ms(),
         }
     }
@@ -344,8 +319,8 @@ impl SheetApp {
         // This copy leaves the system clipboard alone: note what it holds, so Paste can tell
         // that GridCraft's copy is newer while that text is still there.
         if matches!(id, "edit.copy" | "edit.cut") && r.is_ok() {
-            self.clipboard_text_at_copy = self.system_clipboard_text();
-            self.cut_text = if id == "edit.cut" { self.clipboard_text_at_copy.clone() } else { None };
+            let system = self.system_clipboard_text();
+            self.session.host_clipboard.unpublished(id == "edit.cut", system.as_deref());
         }
         r
     }
@@ -407,8 +382,7 @@ impl SheetApp {
         };
         let Some(text) = result.get("text").and_then(Json::as_str) else { return };
         // The system clipboard gets this copy, so its text decides what Paste pastes.
-        self.clipboard_text_at_copy = None;
-        self.cut_text = (command == "edit.cut").then(|| text.replace("\r\n", "\n"));
+        self.session.host_clipboard.published(command == "edit.cut", text);
         if let Some(html) = result.get("html").and_then(Json::as_str)
             && let Some(copy_html) = &mut self.services.copy_html
         {
@@ -420,21 +394,32 @@ impl SheetApp {
         ctx.copy_text(text.to_string());
     }
 
-    /// Paste text that came from the system clipboard (Cmd/Ctrl+V, or the ribbon and menu Paste),
-    /// with the clipboard's HTML flavour when the host can read it.
+    /// Paste text that came from the system clipboard (Cmd/Ctrl+V), with the clipboard's HTML
+    /// flavour when the host can read it. A cut pastes once ([`HostClipboard::paste_text`]).
     ///
-    /// Excel pastes a cut once: after GridCraft's cut has been pasted, the system clipboard text
-    /// that came with it is not pasted again over the moved block; GridCraft's own (empty)
-    /// clipboard is pasted instead, which reports "Nothing to paste.". Other text means the
-    /// clipboard has moved on, so the cut's text is forgotten and pastes normally later.
+    /// [`HostClipboard::paste_text`]: gridcraft_engine::host_clipboard::HostClipboard::paste_text
     pub fn paste_external(&mut self, text: String) {
-        if Self::same_clipboard_text(Some(&text), self.cut_text.as_deref()) {
-            if self.session.clipboard.is_none() {
-                return self.run_or_alert("edit.paste", json!({}));
-            }
-        } else {
-            self.cut_text = None;
-        }
+        let internal = self.session.clipboard.is_some();
+        let paste = self.session.host_clipboard.paste_text(text, internal);
+        self.paste(paste);
+    }
+
+    /// Ribbon and menu Paste: the system clipboard's text, as Cmd/Ctrl+V pastes it, unless
+    /// GridCraft's own copy is newer ([`HostClipboard::paste_command`]).
+    ///
+    /// [`HostClipboard::paste_command`]: gridcraft_engine::host_clipboard::HostClipboard::paste_command
+    pub fn paste_from_clipboard(&mut self) {
+        let system = self.system_clipboard_text();
+        let internal = self.session.clipboard.is_some();
+        let paste = self.session.host_clipboard.paste_command(system.as_deref(), internal);
+        self.paste(paste);
+    }
+
+    fn paste(&mut self, paste: gridcraft_engine::host_clipboard::Paste) {
+        let text = match paste {
+            gridcraft_engine::host_clipboard::Paste::Internal => return self.run_or_alert("edit.paste", json!({})),
+            gridcraft_engine::host_clipboard::Paste::Text(text) => text,
+        };
         let html = self.services.paste_html.as_mut().and_then(|read| read());
         let params = match html {
             Some(html) => json!({"text": text, "html": html}),
@@ -443,32 +428,9 @@ impl SheetApp {
         self.run_or_alert("edit.paste", params);
     }
 
-    /// Ribbon and menu Paste: paste the text on the system clipboard, as Cmd/Ctrl+V does. With no
-    /// text there, no host clipboard (web), or the text that was there when GridCraft last copied
-    /// without publishing, GridCraft's own clipboard is pasted.
-    pub fn paste_from_clipboard(&mut self) {
-        match self.system_clipboard_text() {
-            Some(text) if self.session.clipboard.is_none() || self.clipboard_text_at_copy.as_ref() != Some(&text) => self.paste_external(text),
-            _ => self.run_or_alert("edit.paste", json!({})),
-        }
-    }
-
-    /// The system clipboard's plain text, with the line endings of egui's `Event::Paste` text.
-    /// `None` when it holds no text or the host can't read it.
+    /// The system clipboard's plain text; `None` when it holds no text or the host can't read it.
     fn system_clipboard_text(&mut self) -> Option<String> {
-        self.services.paste_text.as_mut().and_then(|read| read()).filter(|t| !t.is_empty()).map(|t| t.replace("\r\n", "\n"))
-    }
-
-    /// Whether two clipboard texts are the same copy: trailing line breaks don't count, as in the
-    /// engine's `edit.paste`, and CRLF matches LF (egui's `Event::Paste` text may keep the host's).
-    fn same_clipboard_text(a: Option<&str>, b: Option<&str>) -> bool {
-        fn chars(t: &str) -> impl Iterator<Item = char> + '_ {
-            t.trim_end_matches(['\r', '\n']).chars().filter(|c| *c != '\r')
-        }
-        match (a, b) {
-            (Some(a), Some(b)) => chars(a).eq(chars(b)),
-            _ => false,
-        }
+        self.services.paste_text.as_mut().and_then(|read| read()).filter(|t| !t.is_empty())
     }
 
     /// Web: `file.exportPdf` without a path returns the PDF as base64; hand it to the browser as a download.
@@ -784,35 +746,10 @@ impl SheetApp {
         self.show_open_warnings(r);
     }
 
-    /// Turns the `warnings` a `file.open` result carries into an info-bar notice, choosing the
-    /// most important one (a preserved VBA project outranks, say, a skipped optional part).
-    /// Kept deliberately generic: any open-time warning can reach the user this way.
+    /// Turns the `warnings` a `file.open` result carries into an info-bar notice (or clears it
+    /// after a clean open): [`gridcraft_engine::notice::open_notice`].
     pub fn show_open_warnings(&mut self, r: &Json) {
-        let Some(list) = r.get("warnings").and_then(Json::as_array) else {
-            self.notice = None;
-            return;
-        };
-        let msgs: Vec<&str> = list.iter().filter_map(Json::as_str).collect();
-        if msgs.is_empty() {
-            // A clean open clears any notice left over from the previous document.
-            self.notice = None;
-            return;
-        }
-        let vba: Vec<&str> = msgs.iter().copied().filter(|m| m.to_lowercase().contains("macro") || m.contains("VBA")).collect();
-        if !vba.is_empty() {
-            self.notice = Some(Notice {
-                text: "This workbook contains VBA macros. GridCraft keeps them intact when you save, but does not run them.".into(),
-                kind: NoticeKind::Warning,
-                action: Some(("What this means".into(), "macros".into())),
-            });
-        } else {
-            let text = if msgs.len() == 1 {
-                msgs[0].to_string()
-            } else {
-                format!("{} items in this file were handled differently. First: {}", msgs.len(), msgs[0])
-            };
-            self.notice = Some(Notice { text, kind: NoticeKind::Info, action: None });
-        }
+        self.notice = gridcraft_engine::notice::open_notice(r);
     }
 
     pub fn view_key(&self) -> Option<(u64, usize)> {
@@ -832,31 +769,23 @@ impl SheetApp {
     /// The view a sheet opens with: scrolled to the file's saved first visible cell (`topLeftCell`).
     fn saved_view(&self) -> SheetView {
         let Some(sh) = self.session.active().and_then(|d| d.wb.active()) else { return SheetView::default() };
-        if sh.view != gridcraft_engine::model::SheetViewMode::Normal {
-            return SheetView::default();
-        }
-        let (fr, fc) = sh.freeze.unwrap_or((0, 0));
-        let top = sh.view_top_left;
-        let y = sh.row_top(top.row.max(fr)) - sh.row_top(fr);
-        let x = sh.col_left(top.col.max(fc)) - sh.col_left(fc);
-        SheetView { scroll: egui::vec2(x.max(0.0) as f32, y.max(0.0) as f32) }
+        let (x, y) = gridcraft_engine::view_state::saved_scroll(sh);
+        SheetView { scroll: egui::vec2(x as f32, y as f32) }
     }
 
     /// Hands the active document's scroll positions (first visible cell per sheet) and active
-    /// cell to the engine so a save writes them (`sheetView topLeftCell`). Normal view only:
-    /// Page Layout view scrolls over pages, not cells.
+    /// cell to the engine so a save writes them (`sheetView topLeftCell`).
     pub fn store_view_state(&mut self) {
         let Some(d) = self.session.active_mut() else { return };
         let mut tops = Vec::new();
         for (&(uid, si), v) in &self.views {
-            let Some(sh) = d.wb.sheets.get(si).filter(|sh| uid == d.uid && sh.view == gridcraft_engine::model::SheetViewMode::Normal) else {
+            if uid != d.uid {
                 continue;
-            };
-            let (fr, fc) = sh.freeze.unwrap_or((0, 0));
-            // A hair past the edge so a row that starts exactly at the scroll offset is the one found.
-            let row = sh.row_at(sh.row_top(fr) + v.scroll.y.max(0.0) as f64 + 0.01);
-            let col = sh.col_at(sh.col_left(fc) + v.scroll.x.max(0.0) as f64 + 0.01);
-            tops.push((si, CellRef::new(row, col)));
+            }
+            if let Some(top) = d.wb.sheets.get(si).and_then(|sh| gridcraft_engine::view_state::top_left_at(sh, v.scroll.x as f64, v.scroll.y as f64))
+            {
+                tops.push((si, top));
+            }
         }
         d.store_view(&tops);
     }
@@ -906,36 +835,30 @@ impl SheetApp {
             Some(full) if full.to_lowercase().starts_with(&ed.text.to_lowercase()) => full.clone(),
             _ => ed.text.clone(),
         };
-        let text = match self.session.active().map(|d| formula_locale::canonical(&text, ed.locale, &d.wb, ed.sheet, ed.cell)) {
-            Some(Ok(text)) => text,
-            Some(Err(error)) => {
-                self.message = Some(("GridCraft".into(), error.to_string()));
-                self.editor = Some(ed);
-                self.session.mode = gridcraft_engine::Mode::Edit;
-                return false;
-            }
-            None => text,
-        };
-        // Data validation.
-        if let Some(d) = self.session.active()
-            && let Some((dv, msg)) = gridcraft_engine::cmd::data::check_validation(&d.wb, ed.sheet, ed.cell, &text)
-        {
-            if dv.error_style == gridcraft_engine::model::ErrorStyle::Stop {
-                let title = if dv.error_title.is_empty() { "GridCraft".to_string() } else { dv.error_title.clone() };
-                self.message = Some((title, msg));
-                self.editor = Some(ed);
-                self.session.mode = gridcraft_engine::Mode::Edit;
-                return false;
-            }
-            self.toast = Some((msg, now_ms()));
-        }
-        let r = if fill_selection {
-            self.session.run("range.fill", json!({"input": text}))
-        } else {
-            self.session.run("cell.set", json!({"cell": ed.cell.a1(), "input": text, "array": array}))
-        };
+        let r = self.session.run(
+            "edit.commit",
+            json!({
+                "cell": ed.cell.a1(),
+                "input": text,
+                "locale": gridcraft_engine::formula_locale::locale_id(ed.locale),
+                "array": array,
+                "fill": fill_selection,
+            }),
+        );
         match r {
-            Ok(_) => {
+            Ok(r) => {
+                let validation = r.get("validation").filter(|v| !v.is_null());
+                let text_of = |key: &str| validation.and_then(|v| v.get(key)).and_then(Json::as_str).unwrap_or_default().to_string();
+                if r.get("committed").and_then(Json::as_bool) == Some(false) {
+                    // A Stop rule: the entry stays in the editor.
+                    self.message = Some((text_of("title"), text_of("message")));
+                    self.editor = Some(ed);
+                    self.session.mode = gridcraft_engine::Mode::Edit;
+                    return false;
+                }
+                if validation.is_some() {
+                    self.toast = Some((text_of("message"), now_ms()));
+                }
                 if dr != 0 || dc != 0 {
                     self.move_after_enter(dr, dc);
                 }
@@ -1149,8 +1072,8 @@ impl SheetApp {
         if self.grid.autosave
             && self.editor.is_none()
             && self.text_box_editor.is_none()
-            && now - self.grid.last_autosave > 2000.0
-            && self.session.active().is_some_and(|d| d.is_dirty() && d.path.as_deref().is_some_and(|p| p.ends_with(".xlsx")))
+            && now - self.grid.last_autosave > gridcraft_engine::AUTOSAVE_DELAY_MS
+            && self.session.active().is_some_and(gridcraft_engine::DocState::autosave_due)
         {
             self.grid.last_autosave = now;
             self.store_view_state();
@@ -1209,29 +1132,10 @@ impl SheetApp {
         }
     }
 
-    /// Current selection's top-left cell text as A1 (for the Name Box).
+    /// The Name Box text ([`gridcraft_engine::selection::name_box_text`]).
     pub fn name_box_text(&self) -> String {
         let Some(d) = self.session.active() else { return String::new() };
-        let sel = &d.selection;
-        let cur = sel.current();
-        // A named range that exactly matches shows its name.
-        let sh = d.wb.active();
-        if let Some(sh) = sh {
-            for n in &d.wb.names {
-                let target = n.formula.replace('$', "");
-                let (sheet, body) = match target.rsplit_once('!') {
-                    Some((s, b)) => (Some(s.trim_matches('\'').to_string()), b.to_string()),
-                    None => (None, target.clone()),
-                };
-                if sheet.as_deref().is_none_or(|s| s.eq_ignore_ascii_case(&sh.name)) && RangeRef::parse(&body) == Some(cur) {
-                    return n.name.clone();
-                }
-            }
-        }
-        if self.grid.drag_select && !cur.is_single() {
-            return format!("{}R x {}C", cur.height(), cur.width());
-        }
-        sel.active.a1()
+        gridcraft_engine::selection::name_box_text(&d.wb, &d.selection, self.grid.drag_select)
     }
 }
 

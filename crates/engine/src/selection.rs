@@ -216,6 +216,29 @@ pub fn current_region(sheet: &Sheet, c: CellRef) -> RangeRef {
     RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1))
 }
 
+/// The Name Box text for `sel` on the active sheet: the name of a defined name that refers to
+/// exactly the current area, else the active cell (`B3`); while a selection is being dragged
+/// (`dragging`) the size of a multi-cell area (`3R x 2C`).
+pub fn name_box_text(wb: &gridcraft_model::Workbook, sel: &Selection, dragging: bool) -> String {
+    let cur = sel.current();
+    if let Some(sh) = wb.active() {
+        for n in &wb.names {
+            let target = n.formula.replace('$', "");
+            let (sheet, body) = match target.rsplit_once('!') {
+                Some((s, b)) => (Some(s.trim_matches('\'').to_string()), b.to_string()),
+                None => (None, target.clone()),
+            };
+            if sheet.as_deref().is_none_or(|s| s.eq_ignore_ascii_case(&sh.name)) && RangeRef::parse(&body) == Some(cur) {
+                return n.name.clone();
+            }
+        }
+    }
+    if dragging && !cur.is_single() {
+        return format!("{}R x {}C", cur.height(), cur.width());
+    }
+    sel.active.a1()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

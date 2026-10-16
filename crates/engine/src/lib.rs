@@ -12,8 +12,11 @@ mod clip_html;
 pub mod cmd;
 pub mod display;
 pub mod fill;
+pub mod formula_locale;
+pub mod host_clipboard;
 pub mod io;
 pub mod links;
+pub mod notice;
 pub mod outline;
 pub mod paper;
 pub mod pivot;
@@ -22,6 +25,7 @@ pub mod sample;
 pub mod selection;
 pub mod selection_format;
 pub mod tables;
+pub mod view_state;
 pub mod viewport;
 
 use std::sync::Arc;
@@ -116,6 +120,9 @@ pub struct DocState {
     pub content_kind: Option<io::FileKind>,
 }
 
+/// Milliseconds AutoSave waits between saves of a changing workbook.
+pub const AUTOSAVE_DELAY_MS: f64 = 2000.0;
+
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 const UNDO_LIMIT: usize = 100;
 
@@ -143,6 +150,12 @@ impl DocState {
     }
     pub fn is_dirty(&self) -> bool {
         !Arc::ptr_eq(&self.wb, &self.saved)
+    }
+    /// AutoSave may save this workbook now: it changed since it was saved, and it has an XLSX
+    /// file to go back to. Frontends wait [`AUTOSAVE_DELAY_MS`] between saves, and don't save
+    /// while the user is typing in a cell or text box.
+    pub fn autosave_due(&self) -> bool {
+        self.is_dirty() && self.path.as_deref().is_some_and(|p| p.ends_with(".xlsx"))
     }
     pub fn sheet_index(&self) -> usize {
         self.wb.active_sheet
@@ -258,6 +271,8 @@ pub struct Session {
     /// Review › Notes › Show All Notes: every note is displayed. An application display setting
     /// (like Excel's comment indicator option), so it's not saved in the file.
     pub show_all_notes: bool,
+    /// What the system clipboard held around GridCraft's copies (frontends with one).
+    pub host_clipboard: host_clipboard::HostClipboard,
 }
 
 impl Session {

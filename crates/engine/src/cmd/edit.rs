@@ -29,6 +29,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             range_fill
         ),
+        cmd!(
+            delegate "edit.commit",
+            "Confirm Entry",
+            [],
+            None,
+            "{input, cell?, locale?: en|es, array?: bool, fill?: bool (every selected cell)} → {committed, validation?: {style: stop|warning|information, title, message}}: what the user typed in `locale`'s formula syntax, checked against data validation (a Stop rule rejects it)",
+            has_doc,
+            edit_commit
+        ),
         cmd!(noundo "selection.set", "Select", [], None, "{range: \"A1:B2,D4\" | cell, active?: \"A1\", sheet?}", has_doc, selection_set),
         cmd!(noundo "selection.move", "Move Selection", [], None, "{dr, dc, extend?: bool, jump?: bool (Ctrl+arrow), page?: bool}", has_doc, selection_move),
         cmd!(noundo "selection.next", "Next Cell in Selection", [], None, "{forward?: true, byRow?: false} (Enter/Tab inside a selection)", has_doc, selection_next),
@@ -330,6 +339,39 @@ fn range_set_values(s: &mut Session, p: &Json) -> Result<Json> {
         Ok(())
     })?;
     Ok(json!({"cells": count}))
+}
+
+/// Confirms an in-cell or formula-bar entry: the interface's formula syntax becomes canonical,
+/// data validation applies, then `cell.set` (or `range.fill`) enters it.
+fn edit_commit(s: &mut Session, p: &Json) -> Result<Json> {
+    let input = str_param(p, "input").ok_or_else(|| bad("edit.commit", "missing `input`"))?;
+    let locale = crate::formula_locale::locale_param(str_param(p, "locale"));
+    let cell = match cell_param(s, p, "cell")? {
+        Some(c) => c,
+        None => s.doc()?.selection.active,
+    };
+    let d = s.doc()?;
+    let sheet = d.wb.active_sheet;
+    let text = crate::formula_locale::canonical(input, locale, &d.wb, sheet, cell).map_err(|e| EngineError::Other(e.to_string()))?;
+    let mut validation = Json::Null;
+    if let Some((dv, message)) = super::data::check_validation(&d.wb, sheet, cell, &text) {
+        let style = match dv.error_style {
+            gridcraft_model::ErrorStyle::Stop => "stop",
+            gridcraft_model::ErrorStyle::Warning => "warning",
+            gridcraft_model::ErrorStyle::Information => "information",
+        };
+        let title = if dv.error_title.is_empty() { "GridCraft".to_string() } else { dv.error_title.clone() };
+        validation = json!({"style": style, "title": title, "message": message});
+        if dv.error_style == gridcraft_model::ErrorStyle::Stop {
+            return Ok(json!({"committed": false, "validation": validation}));
+        }
+    }
+    if bool_param(p, "fill").unwrap_or(false) {
+        s.execute("range.fill", json!({"input": text}))?;
+    } else {
+        s.execute("cell.set", json!({"cell": cell.a1(), "input": text, "array": bool_param(p, "array").unwrap_or(false)}))?;
+    }
+    Ok(json!({"committed": true, "validation": validation}))
 }
 
 fn range_fill(s: &mut Session, p: &Json) -> Result<Json> {

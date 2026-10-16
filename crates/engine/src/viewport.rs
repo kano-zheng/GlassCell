@@ -408,7 +408,7 @@ impl<'a> Ctx<'a> {
         let shown = shown_text(wb, sh, c, v, st, avail_w, char_w);
         let mut text = shown.text;
         if sh.show_formulas && sh.cell(c).is_some_and(|cell| cell.formula.is_some()) {
-            text = crate::display::formula_display(&text, self.locale, wb, self.si);
+            text = crate::formula_locale::display(&text, self.locale, wb, self.si);
         }
         if text.is_empty() {
             return None;
