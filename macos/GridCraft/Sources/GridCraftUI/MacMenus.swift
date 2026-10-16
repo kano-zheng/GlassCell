@@ -215,7 +215,11 @@ struct MenuItems: View {
                 ForEach(section.commands, id: \.id) { info in
                     Button(info.label) {
                         guard let focus, focus.editor.commitIfEditing() else { return }
-                        focus.document.run(info.id)
+                        if MacActions.handled.contains(info.id) {
+                            MacActions.run(info.id, document: focus.document)
+                        } else {
+                            focus.document.run(info.id)
+                        }
                     }
                     .keyboardShortcut(MacPlacement.shortcut(for: info))
                     .disabled(focus == nil || !info.enabled)

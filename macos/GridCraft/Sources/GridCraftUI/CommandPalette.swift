@@ -60,7 +60,11 @@ struct CommandPalette: View {
         guard let id, matches.first(where: { $0.id == id })?.enabled == true else { return }
         dismiss()
         guard editor.commitIfEditing() else { return }
-        document.run(id)
+        if MacActions.handled.contains(id) {
+            MacActions.run(id, document: document)
+        } else {
+            document.run(id)
+        }
     }
 
     private func describe(_ s: KeyboardShortcut) -> String {
