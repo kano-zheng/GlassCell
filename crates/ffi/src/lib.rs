@@ -145,6 +145,21 @@ impl Engine {
         })
     }
 
+    /// The active workbook's undo history: labels (most recent first), and a revision that moves
+    /// whenever an undoable command changed the workbook.
+    pub fn history(&self) -> Result<History, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            Ok(History {
+                undo: d.undo.iter().rev().map(|e| e.label.clone()).collect(),
+                redo: d.redo.iter().rev().map(|e| e.label.clone()).collect(),
+                revision: d.revision,
+                dirty: d.is_dirty(),
+            })
+        })
+    }
+
     /// The active sheet's selection.
     pub fn selection(&self) -> Result<SelectionState, FfiError> {
         guard(|| {

@@ -52,17 +52,51 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
         FileWrapper(regularFileWithContents: snapshot)
     }
 
+    /// The window's undo manager. Every undoable engine command registers one step on it, which
+    /// runs the engine's own undo; that also marks the document edited, so it autosaves.
+    @MainActor public weak var undoManager: UndoManager? {
+        didSet { undoManager?.levelsOfUndo = 100 }
+    }
+
     /// Runs a command; errors are kept in `problem` for the window to show.
-    @discardableResult
+    @MainActor @discardableResult
     public func run(_ id: String, _ params: [String: Any] = [:]) -> String? {
+        let before = try? engine.history().revision
+        defer { generation += 1 }
         do {
             let result = try engine.execute(id: id, params: params.isEmpty ? "" : JSON.encode(params))
-            generation += 1
+            if let history = try? engine.history(), history.revision != before {
+                registerUndo(history.undo.first ?? "")
+            }
             return result
         } catch {
             problem = error.localizedDescription
-            generation += 1
             return nil
         }
+    }
+
+    @MainActor private func registerUndo(_ label: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { document in
+            document.step("edit.undo")
+        }
+        undoManager.setActionName(label)
+    }
+
+    /// Undo or redo one engine step, registering the opposite step.
+    @MainActor private func step(_ id: String) {
+        defer { generation += 1 }
+        do {
+            _ = try engine.execute(id: id, params: "")
+        } catch {
+            problem = error.localizedDescription
+            return
+        }
+        guard let undoManager, let history = try? engine.history() else { return }
+        let opposite = id == "edit.undo" ? "edit.redo" : "edit.undo"
+        undoManager.registerUndo(withTarget: self) { document in
+            document.step(opposite)
+        }
+        undoManager.setActionName((id == "edit.undo" ? history.redo.first : history.undo.first) ?? "")
     }
 }

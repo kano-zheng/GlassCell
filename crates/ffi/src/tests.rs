@@ -103,3 +103,19 @@ fn references_are_named_like_the_engine_names_them() {
     let r = CellRange { first: CellAddress { row: 0, col: 0 }, last: CellAddress { row: 4, col: 2 } };
     assert_eq!(range_name(r), "A1:C5");
 }
+
+#[test]
+fn history_follows_undoable_commands() {
+    let e = engine();
+    let h0 = e.history().unwrap();
+    assert!(!h0.dirty);
+    e.execute("cell.set".into(), r#"{"cell": "A1", "input": "x"}"#.into()).unwrap();
+    let h1 = e.history().unwrap();
+    assert_ne!(h1.revision, h0.revision);
+    assert_eq!(h1.undo.first().map(String::as_str), Some("Enter Cell"));
+    assert!(h1.dirty);
+    e.execute("selection.set".into(), r#"{"range": "B2"}"#.into()).unwrap();
+    assert_eq!(e.history().unwrap().revision, h1.revision, "selecting isn't undoable");
+    e.execute("edit.undo".into(), String::new()).unwrap();
+    assert_eq!(e.history().unwrap().redo.first().map(String::as_str), Some("Enter Cell"));
+}

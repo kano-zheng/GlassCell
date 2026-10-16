@@ -4,6 +4,7 @@ import SwiftUI
 /// A workbook window: the grid, with the sheet tabs below and the zoom in the toolbar.
 public struct WorkbookView: View {
     @ObservedObject var document: SpreadsheetDocument
+    @Environment(\.undoManager) private var undoManager
     @State private var frameTime: Double = 0
 
     public init(document: SpreadsheetDocument) {
@@ -52,6 +53,8 @@ public struct WorkbookView: View {
                 }
             }
         }
+        .onAppear { document.undoManager = undoManager }
+        .onChange(of: undoManager.map(ObjectIdentifier.init)) { document.undoManager = undoManager }
         .alert("GridCraft", isPresented: Binding(get: { document.problem != nil }, set: { if !$0 { document.problem = nil } })) {
             Button("OK") { document.problem = nil }
         } message: {

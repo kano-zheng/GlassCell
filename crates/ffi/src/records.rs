@@ -612,6 +612,18 @@ impl SelectionFormat {
 // ------------------------------------------------------------------ session
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct History {
+    /// Undo labels, most recent first.
+    pub undo: Vec<String>,
+    /// Redo labels, the next redo first.
+    pub redo: Vec<String>,
+    /// Moves whenever an undoable command changes the workbook.
+    pub revision: u64,
+    /// Changed since it was opened or saved.
+    pub dirty: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct SelectionState {
     pub active: CellAddress,
     /// The selected areas; the last holds the active cell.
