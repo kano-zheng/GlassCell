@@ -168,7 +168,13 @@ public struct WorkbookCommands: Commands {
         // The engine's Print and Page Setup replace the standard ones.
         CommandGroup(replacing: .printItem) { MenuItems(menu: .file, focus: focus) }
         CommandGroup(after: .pasteboard) { MenuItems(menu: .edit, focus: focus) }
-        CommandGroup(after: .toolbar) { MenuItems(menu: .view, focus: focus) }
+        CommandGroup(after: .toolbar) {
+            Button(focus?.document.showInspector == true ? "Hide Inspector" : "Show Inspector") { focus?.document.showInspector.toggle() }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(focus == nil)
+            Divider()
+            MenuItems(menu: .view, focus: focus)
+        }
         CommandMenu("Insert") { MenuItems(menu: .insert, focus: focus) }
         CommandMenu("Format") { MenuItems(menu: .format, focus: focus) }
         CommandMenu("Formulas") { MenuItems(menu: .formulas, focus: focus) }

@@ -77,6 +77,10 @@ public struct WorkbookView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
         }
+        .inspector(isPresented: $document.showInspector) {
+            InspectorView(document: document, editor: editor)
+                .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+        }
         .toolbar(id: "gridcraft.workbook") {
             WorkbookToolbar(document: document, editor: editor, undoManager: undoManager)
         }

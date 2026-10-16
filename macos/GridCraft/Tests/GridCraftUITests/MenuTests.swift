@@ -18,7 +18,7 @@ import Testing
 
     @Test func shortcutsAreUniqueAndLeaveTheSystemsAlone() {
         var seen: [String: String] = [:]
-        let system: Set<String> = ["⌘n", "⌘o", "⌘s", "⌘w", "⌘z", "⇧⌘z", "⌘c", "⌘x", "⌘v", "⌘a", "⌘q", "⌘h", "⌘m", "⌘,", "⇧⌘p"]
+        let system: Set<String> = ["⌘n", "⌘o", "⌘s", "⌘w", "⌘z", "⇧⌘z", "⌘c", "⌘x", "⌘v", "⌘a", "⌘q", "⌘h", "⌘m", "⌘,", "⇧⌘p", "⌥⌘i"]
         for info in catalog where MacPlacement.place(info) != nil {
             guard let s = MacPlacement.shortcut(for: info) else { continue }
             var key = ""

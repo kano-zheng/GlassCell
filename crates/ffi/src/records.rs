@@ -653,6 +653,10 @@ pub struct SheetInfo {
     pub normal_view: bool,
     pub default_row_height: f32,
     pub default_col_width: f32,
+    /// Page setup: landscape (else portrait), and printing gridlines and headings.
+    pub landscape: bool,
+    pub print_gridlines: bool,
+    pub print_headings: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]

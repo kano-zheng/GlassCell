@@ -257,6 +257,9 @@ impl Engine {
                 normal_view: sh.view == model::SheetViewMode::Normal,
                 default_row_height: sh.default_row_height,
                 default_col_width: sh.default_col_width,
+                landscape: sh.print.orientation == model::Orientation::Landscape,
+                print_gridlines: sh.print.gridlines,
+                print_headings: sh.print.headings,
             })
         })
     }
