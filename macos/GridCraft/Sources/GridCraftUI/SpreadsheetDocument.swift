@@ -21,6 +21,13 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
     @Published public var problem: String?
     /// A passing remark for the status bar (a Warning or Information validation message).
     @Published public var notice: String?
+    /// What commands asked the window to do (open a dialog, show a message, start editing, open
+    /// a link); the window handles and clears them.
+    @Published public var requests: [UiRequest] = []
+    /// The command palette is open.
+    @Published public var showPalette = false
+    /// The inspector is shown.
+    @Published public var showInspector = false
 
     /// A new workbook: empty, or one of the engine's samples (`sales`, `budget`, `grades`).
     public init(sample: String? = nil) {
@@ -69,6 +76,9 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
             let result = try engine.execute(id: id, params: params.isEmpty ? "" : JSON.encode(params))
             if let history = try? engine.history(), history.revision != before {
                 registerUndo(history.undo.first ?? "")
+            }
+            if let asked = try? engine.takeUiRequests(), !asked.isEmpty {
+                requests.append(contentsOf: asked)
             }
             return result
         } catch {

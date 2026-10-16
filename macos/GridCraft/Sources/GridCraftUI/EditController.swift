@@ -219,6 +219,14 @@ public final class EditController {
         return true
     }
 
+    /// Before a menu command: an edit in progress is confirmed first (`false`: it was refused).
+    public func commitIfEditing() -> Bool {
+        guard isEditing else { return true }
+        let ok = commit()
+        if ok { ended() }
+        return ok
+    }
+
     /// Esc.
     public func cancel() {
         finish()

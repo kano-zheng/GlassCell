@@ -171,6 +171,16 @@ public final class GridNSView: NSView {
         }
     }
 
+    /// Starts editing for a command (`UiRequest.editCell`): with `text` (an engine template such
+    /// as `=SUM(`), or from the cell's content.
+    public func beginEditing(text: String?) {
+        guard let editor else { return }
+        editor.begin(typing: text)
+        if editor.isEditing {
+            showEditor()
+        }
+    }
+
     private func showEditor() {
         guard let editor, let document else { return }
         // The editor writes in the cell's font, at the zoom.

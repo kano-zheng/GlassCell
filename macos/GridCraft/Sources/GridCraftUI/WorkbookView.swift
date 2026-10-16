@@ -1,3 +1,4 @@
+import AppKit
 import GridCraftEngine
 import SwiftUI
 
@@ -16,6 +17,27 @@ public struct WorkbookView: View {
     private var sheet: SheetInfo? {
         _ = document.generation
         return try? document.engine.sheet()
+    }
+
+    /// What a command asked for: dialogs (the Mac's come in MAC6; Format Cells is the
+    /// inspector), messages, editing with a template, links.
+    private func handle(_ request: UiRequest) {
+        switch request {
+        case let .dialog(name, _):
+            if name == "formatCells" {
+                document.showInspector = true
+            } else {
+                document.problem = "The “\(name)” dialog isn't in GridCraft for Mac yet."
+            }
+        case let .message(text):
+            document.problem = text
+        case let .editCell(text):
+            editor.grid?.beginEditing(text: text)
+        case let .openUrl(url):
+            if let link = URL(string: url) {
+                NSWorkspace.shared.open(link)
+            }
+        }
     }
 
     public var body: some View {
@@ -65,6 +87,17 @@ public struct WorkbookView: View {
                 Button("Zoom In", systemImage: "plus.magnifyingglass") {
                     document.run("view.zoom", ["percent": min(400, Int(sheet?.zoom ?? 100) + 10)])
                 }
+            }
+        }
+        .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
+        .sheet(isPresented: $document.showPalette) {
+            CommandPalette(document: document, editor: editor)
+        }
+        .onChange(of: document.requests) { _, requests in
+            guard !requests.isEmpty else { return }
+            document.requests = []
+            for request in requests {
+                handle(request)
             }
         }
         .onAppear { document.undoManager = undoManager }
