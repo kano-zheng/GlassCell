@@ -77,17 +77,8 @@ public struct WorkbookView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
         }
-        .toolbar {
-            ToolbarItemGroup {
-                Button("Zoom Out", systemImage: "minus.magnifyingglass") {
-                    document.run("view.zoom", ["percent": max(10, Int(sheet?.zoom ?? 100) - 10)])
-                }
-                Text("\(sheet?.zoom ?? 100)%")
-                    .monospacedDigit()
-                Button("Zoom In", systemImage: "plus.magnifyingglass") {
-                    document.run("view.zoom", ["percent": min(400, Int(sheet?.zoom ?? 100) + 10)])
-                }
-            }
+        .toolbar(id: "gridcraft.workbook") {
+            WorkbookToolbar(document: document, editor: editor, undoManager: undoManager)
         }
         .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
         .sheet(isPresented: $document.showPalette) {
