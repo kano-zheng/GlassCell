@@ -90,3 +90,28 @@ import Testing
         #expect(rig.text("C3") == "")
     }
 }
+
+@MainActor
+@Suite struct ContextMenuTests {
+    @Test func aRightClickOnAColumnHeaderSelectsItAndInsertsAColumn() throws {
+        let document = SpreadsheetDocument()
+        document.run("cell.set", ["cell": "B1", "input": "moves right"])
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 500), styleMask: [.titled], backing: .buffered, defer: false)
+        let grid = GridNSView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
+        window.contentView = grid
+        grid.document = document
+        grid.editor = EditController(document: document)
+        let layout = try GridRenderer(engine: document.engine, measurer: CoreTextMeasurer()).layout(size: grid.bounds.size, scroll: .zero)
+        let b = cgRect(layout.geometry.cellRect(cell: CellAddress(row: 0, col: 1)))
+        let click = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: grid.convert(CGPoint(x: b.midX, y: layout.headerHeight / 2), to: nil),
+                                                     modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try #require(grid.menu(for: click))
+        #expect(try document.engine.nameBoxText(dragging: false) == "B1")
+        #expect(try document.engine.selection().ranges.first?.last.row == 1_048_575)
+        let insert = try #require(menu.items.first { $0.title == "Insert" })
+        #expect(grid.validateMenuItem(insert))
+        grid.runMenuCommand(insert)
+        let moved = JSON.decode(try document.engine.execute(id: "cell.get", params: #"{"cell": "C1"}"#))
+        #expect(moved["text"] as? String == "moves right")
+    }
+}

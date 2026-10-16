@@ -668,12 +668,139 @@ public final class GridNSView: NSView {
     }
 }
 
+// MARK: - Context menus
+
+extension GridNSView {
+    /// What a right-click is on.
+    private enum MenuTarget {
+        case cells, rows, columns
+    }
+
+    /// The context menu for a right-click: the cells, or a row or column header. A click outside
+    /// the selection selects what it is on first, as in Excel.
+    public override func menu(for event: NSEvent) -> NSMenu? {
+        guard let document, let layout = layoutCacheForMenu() else { return nil }
+        guard editor?.commitIfEditing() != false else { return nil }
+        let p = convert(event.locationInWindow, from: nil)
+        let geometry = layout.geometry
+        let target: MenuTarget
+        let cell = CellAddress(row: geometry.rowAt(y: Float(max(p.y, layout.headerHeight + 1))), col: geometry.colAt(x: Float(max(p.x, layout.headerWidth + 1))))
+        let ranges = (try? document.engine.selection().ranges) ?? []
+        if p.y < layout.headerHeight, p.x >= layout.headerWidth {
+            target = .columns
+            if !ranges.contains(where: { $0.first.row == 0 && $0.last.row >= 1_048_575 && cell.col >= $0.first.col && cell.col <= $0.last.col }) {
+                document.run("selection.set", ["range": rangeName(range: CellRange(first: CellAddress(row: 0, col: cell.col), last: CellAddress(row: 1_048_575, col: cell.col)))])
+            }
+        } else if p.x < layout.headerWidth, p.y >= layout.headerHeight {
+            target = .rows
+            if !ranges.contains(where: { $0.first.col == 0 && $0.last.col >= 16_383 && cell.row >= $0.first.row && cell.row <= $0.last.row }) {
+                document.run("selection.set", ["range": rangeName(range: CellRange(first: CellAddress(row: cell.row, col: 0), last: CellAddress(row: cell.row, col: 16_383)))])
+            }
+        } else if p.x >= layout.headerWidth, p.y >= layout.headerHeight {
+            target = .cells
+            if !ranges.contains(where: { cell.row >= $0.first.row && cell.row <= $0.last.row && cell.col >= $0.first.col && cell.col <= $0.last.col }) {
+                document.run("selection.set", ["range": cellName(cell: cell)])
+            }
+        } else {
+            return nil
+        }
+        needsDisplay = true
+        let menu = NSMenu()
+        let enabled = Dictionary(((try? document.engine.commands()) ?? []).map { ($0.id, $0.enabled) }, uniquingKeysWith: { a, _ in a })
+        func item(_ title: String, _ id: String, _ params: [String: Any] = [:]) {
+            let entry = NSMenuItem(title: title, action: #selector(runMenuCommand(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = MenuCommand(id: id, params: params)
+            entry.isEnabled = enabled[id] ?? true
+            menu.addItem(entry)
+        }
+        func standard(_ title: String, _ action: Selector) {
+            menu.addItem(NSMenuItem(title: title, action: action, keyEquivalent: ""))
+        }
+        standard("Cut", #selector(cut(_:)))
+        standard("Copy", #selector(copy(_:)))
+        standard("Paste", #selector(paste(_:)))
+        item("Paste Special…", "edit.pasteSpecial")
+        menu.addItem(.separator())
+        switch target {
+        case .cells:
+            item("Insert…", "home.insertCells")
+            item("Delete…", "home.deleteCells")
+            item("Clear Contents", "edit.clearContents")
+            menu.addItem(.separator())
+            item("Filter by Selected Cell's Value", "data.filterBy")
+            item("Sort A to Z", "data.sortAscending")
+            item("Sort Z to A", "data.sortDescending")
+            menu.addItem(.separator())
+            item("New Comment", "review.newComment")
+            item("New Note", "review.newNote")
+            menu.addItem(.separator())
+            let format = NSMenuItem(title: "Format Cells…", action: #selector(showInspector(_:)), keyEquivalent: "")
+            format.target = self
+            menu.addItem(format)
+            item("Define Name…", "formulas.defineName")
+            item("Link…", "insert.link")
+        case .rows:
+            item("Insert", "home.insertRows")
+            item("Delete", "home.deleteRows")
+            item("Clear Contents", "edit.clearContents")
+            menu.addItem(.separator())
+            item("Row Height…", "home.rowHeight")
+            item("AutoFit Row Height", "home.autofitRowHeight")
+            item("Hide", "home.hideRows")
+            item("Unhide", "home.unhideRows")
+            item("Group", "data.group")
+        case .columns:
+            item("Insert", "home.insertColumns")
+            item("Delete", "home.deleteColumns")
+            item("Clear Contents", "edit.clearContents")
+            menu.addItem(.separator())
+            item("Column Width…", "home.columnWidth")
+            item("AutoFit Column Width", "home.autofitColumnWidth")
+            item("Hide", "home.hideColumns")
+            item("Unhide", "home.unhideColumns")
+            item("Sort A to Z", "data.sortAscending")
+            item("Group", "data.group")
+        }
+        return menu
+    }
+
+    private func layoutCacheForMenu() -> GridRenderer.Layout? {
+        guard let document else { return nil }
+        return try? GridRenderer(engine: document.engine, measurer: CoreTextMeasurer()).layout(size: bounds.size, scroll: scroll)
+    }
+
+    @objc func runMenuCommand(_ sender: NSMenuItem) {
+        guard let command = sender.representedObject as? MenuCommand else { return }
+        document?.run(command.id, command.params)
+        needsDisplay = true
+    }
+
+    @objc private func showInspector(_ sender: Any?) {
+        document?.showInspector = true
+    }
+}
+
+/// A context-menu item's command.
+final class MenuCommand: NSObject {
+    let id: String
+    let params: [String: Any]
+
+    init(id: String, params: [String: Any]) {
+        self.id = id
+        self.params = params
+    }
+}
+
 extension GridNSView: NSMenuItemValidation {
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        guard document != nil else { return false }
+        guard let document else { return false }
+        if let command = item.representedObject as? MenuCommand {
+            return (try? document.engine.commands().first { $0.id == command.id }?.enabled) ?? true
+        }
         switch item.action {
         case #selector(paste(_:)):
-            return NSPasteboard.general.string(forType: .string) != nil || (try? document?.engine.commands().first { $0.id == "edit.paste" }?.enabled) == true
+            return NSPasteboard.general.string(forType: .string) != nil || (try? document.engine.commands().first { $0.id == "edit.paste" }?.enabled) == true
         default:
             return true
         }
