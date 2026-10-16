@@ -13,6 +13,7 @@ pub mod cmd;
 pub mod display;
 pub mod entry;
 pub mod fill;
+pub mod forms;
 pub mod formula_locale;
 pub mod geometry;
 pub mod host_clipboard;

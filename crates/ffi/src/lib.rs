@@ -23,9 +23,11 @@ use gridcraft_engine::viewport::{self as vp, Measure};
 use serde_json::Value as Json;
 
 mod entry;
+mod forms;
 mod records;
 
 pub use entry::*;
+pub use forms::*;
 pub use records::*;
 
 uniffi::setup_scaffolding!();

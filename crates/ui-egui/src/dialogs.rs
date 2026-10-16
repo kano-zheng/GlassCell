@@ -12,15 +12,8 @@ use serde_json::{Map, Value as Json, json};
 use crate::SheetApp;
 use crate::theme;
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Field {
-    Text { key: &'static str, label: &'static str },
-    Password { key: &'static str, label: &'static str },
-    Number { key: &'static str, label: &'static str },
-    Choice { key: &'static str, label: &'static str, options: Vec<(&'static str, &'static str)> },
-    Check { key: &'static str, label: &'static str },
-    Note(String),
-}
+/// Form controls: the engine's (`gridcraft_engine::forms`).
+pub use gridcraft_engine::forms::Field;
 
 #[derive(Clone, Debug)]
 pub struct Dialog {
@@ -47,15 +40,25 @@ impl Dialog {
         &self.name
     }
 
-    /// Sets a form value. In Zoom, a Magnification choice is also the percentage `view.zoom` stores.
+    /// Sets a form value, with the fields that follow it ([`gridcraft_engine::forms::set_value`]).
     pub(crate) fn set_value(&mut self, key: &str, value: Json) {
-        if self.name == "zoom"
-            && key == "preset"
-            && let Some(p) = value.as_str().and_then(|s| s.parse::<f64>().ok())
-        {
-            self.values.insert("percent".into(), json!(p));
-        }
-        self.values.insert(key.into(), value);
+        let mut form = gridcraft_engine::forms::Form {
+            name: self.name.clone(),
+            title: self.title.clone(),
+            command: self.command.unwrap_or(""),
+            fields: std::mem::take(&mut self.fields),
+            values: std::mem::take(&mut self.values),
+        };
+        gridcraft_engine::forms::set_value(&mut form, key, value);
+        self.fields = form.fields;
+        self.values = form.values;
+    }
+
+    /// A dialog for one of the engine's forms.
+    fn from_form(f: gridcraft_engine::forms::Form) -> Dialog {
+        let mut d = Dialog::form(&f.name, &f.title, f.command, f.fields, Json::Object(f.values));
+        d.name = f.name;
+        d
     }
 
     fn form(name: &str, title: &str, command: &'static str, fields: Vec<Field>, defaults: Json) -> Dialog {
@@ -97,382 +100,13 @@ impl Dialog {
     pub fn open(app: &mut SheetApp, name: &str, params: Json) -> Option<Dialog> {
         let sel = app.session.active().map(|d| d.selection.current().a1()).unwrap_or_default();
         let active = app.session.active().map(|d| d.selection.active.a1()).unwrap_or_default();
+        // The plain forms are the engine's.
+        if let Some(form) = gridcraft_engine::forms::open(&mut app.session, name, &params) {
+            return Some(Dialog::from_form(form));
+        }
         let p = |k: &str| params.get(k).cloned().unwrap_or(Json::Null);
-        use Field::*;
         let d = match name {
-            "insertCells" => Dialog::form(
-                "insertCells",
-                "Insert",
-                "home.insertCells",
-                vec![Choice {
-                    key: "shift",
-                    label: "Insert",
-                    options: vec![("right", "Shift cells right"), ("down", "Shift cells down"), ("row", "Entire row"), ("column", "Entire column")],
-                }],
-                json!({"shift": "down"}),
-            ),
-            "insertPaste" => Dialog::form(
-                "insertPaste",
-                "Insert Paste",
-                "home.insertCopiedCells",
-                vec![Choice { key: "shift", label: "Insert", options: vec![("right", "Shift cells right"), ("down", "Shift cells down")] }],
-                json!({"shift": "down"}),
-            ),
-            "deleteCells" => Dialog::form(
-                "deleteCells",
-                "Delete",
-                "home.deleteCells",
-                vec![Choice {
-                    key: "shift",
-                    label: "Delete",
-                    options: vec![("left", "Shift cells left"), ("up", "Shift cells up"), ("row", "Entire row"), ("column", "Entire column")],
-                }],
-                json!({"shift": "up"}),
-            ),
-            "rowHeight" => Dialog::form(
-                "rowHeight",
-                "Row Height",
-                "home.rowHeight",
-                vec![Number { key: "height", label: "Row height (pixels):" }],
-                json!({"height": app.session.active().and_then(|d| d.wb.active().map(|s| s.row_height(d.selection.active.row))).unwrap_or(20.0)}),
-            ),
-            "columnWidth" => Dialog::form(
-                "columnWidth",
-                "Column Width",
-                "home.columnWidth",
-                vec![Number { key: "chars", label: "Column width (characters):" }],
-                json!({"chars": app.session.active().and_then(|d| d.wb.active().map(|s| gridcraft_engine::cmd::format::points_to_chars(s.col_width(d.selection.active.col) as f64))).unwrap_or(8.43)}),
-            ),
-            "defaultWidth" => Dialog::form(
-                "defaultWidth",
-                "Standard Width",
-                "home.defaultWidth",
-                vec![Number { key: "width", label: "Standard column width (pixels):" }],
-                json!({"width": 64}),
-            ),
-            "renameSheet" => Dialog::form(
-                "renameSheet",
-                "Rename Sheet",
-                "sheet.rename",
-                vec![Text { key: "name", label: "Name:" }],
-                json!({"name": app.session.active().and_then(|d| d.wb.active().map(|s| s.name.clone()))}),
-            ),
-            "moveSheet" => {
-                let sheets: Vec<String> = app.session.active().map(|d| d.wb.sheets.iter().map(|s| s.name.clone()).collect()).unwrap_or_default();
-                let mut d = Dialog::form(
-                    "moveSheet",
-                    "Move or Copy",
-                    "sheet.move",
-                    vec![
-                        Number { key: "to", label: "Before sheet (position, 0 = first):" },
-                        Check { key: "copy", label: "Create a copy" },
-                        Note(format!("Sheets: {}", sheets.join(", "))),
-                    ],
-                    json!({"to": 0, "copy": false}),
-                );
-                if let Some(s) = params.get("sheet") {
-                    d.values.insert("sheet".into(), s.clone());
-                }
-                d
-            }
-            "protectSheet" => Dialog::form(
-                "protectSheet",
-                "Protect Sheet",
-                "review.protectSheet",
-                vec![
-                    Password { key: "password", label: "Password (optional):" },
-                    Note("Allow all users of this sheet to:".into()),
-                    Check { key: "formatCells", label: "Format cells" },
-                    Check { key: "formatColumns", label: "Format columns" },
-                    Check { key: "formatRows", label: "Format rows" },
-                    Check { key: "insertRows", label: "Insert rows" },
-                    Check { key: "deleteRows", label: "Delete rows" },
-                    Check { key: "sort", label: "Sort" },
-                    Check { key: "autofilter", label: "Use AutoFilter" },
-                ],
-                json!({}),
-            ),
-            "allowEditRanges" => {
-                let list = app.session.run("review.allowEditRanges", json!({})).unwrap_or(Json::Null);
-                let rows: Vec<String> = list
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .map(|r| {
-                                let lock = match (r["password"].as_bool(), r["unlocked"].as_bool()) {
-                                    (Some(true), Some(true)) => " (password, unlocked)",
-                                    (Some(true), _) => " (password)",
-                                    _ => "",
-                                };
-                                format!("{}: {}{lock}", r["title"].as_str().unwrap_or(""), r["range"].as_str().unwrap_or(""))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let summary = if rows.is_empty() { "No ranges yet.".to_string() } else { rows.join("\n") };
-                Dialog::form(
-                    "allowEditRanges",
-                    "Allow Edit Ranges",
-                    "review.allowEditRanges",
-                    vec![
-                        Note(format!("Ranges that stay editable when the sheet is protected:\n{summary}")),
-                        Choice {
-                            key: "action",
-                            label: "Action",
-                            options: vec![("add", "New"), ("modify", "Modify"), ("delete", "Delete"), ("unlock", "Unlock with password")],
-                        },
-                        Text { key: "title", label: "Title:" },
-                        Text { key: "range", label: "Refers to cells:" },
-                        Text { key: "password", label: "Range password:" },
-                        Text { key: "newTitle", label: "New title (Modify):" },
-                        Check { key: "removePassword", label: "Remove the password (Modify)" },
-                    ],
-                    json!({"action": "add", "range": sel}),
-                )
-            }
-            "protectWorkbook" => Dialog::form(
-                "protectWorkbook",
-                "Protect Structure and Windows",
-                "review.protectWorkbook",
-                vec![
-                    Password { key: "password", label: "Password (optional):" },
-                    Note("Protect workbook for: Structure (sheets can't be added, moved, renamed, hidden or deleted).".into()),
-                ],
-                json!({"on": true}),
-            ),
-            "unprotectWorkbook" => Dialog::form(
-                "unprotectWorkbook",
-                "Unprotect Workbook",
-                "review.protectWorkbook",
-                vec![Password { key: "password", label: "Password:" }],
-                json!({"on": false}),
-            ),
-            "openPassword" => {
-                // The file rides along in the values (`path` on the desktop, `name` and `base64`
-                // on the web) and goes back to `file.open` with the password.
-                let source = p("path").as_str().or(p("name").as_str()).map(str::to_string).unwrap_or_default();
-                let file = std::path::Path::new(&source).file_name().and_then(|n| n.to_str()).unwrap_or("This workbook").to_string();
-                // An empty password from the start, so OK on the untouched field says "incorrect"
-                // rather than asking for the password again.
-                let mut values = params.clone();
-                values["password"] = json!("");
-                Dialog::form(
-                    "openPassword",
-                    "Password",
-                    "file.open",
-                    vec![Note(format!("'{file}' is protected.")), Password { key: "password", label: "Password:" }],
-                    values,
-                )
-            }
-            "unprotectSheet" => Dialog::form(
-                "unprotectSheet",
-                "Unprotect Sheet",
-                "review.unprotectSheet",
-                vec![Password { key: "password", label: "Password:" }],
-                json!({}),
-            ),
-            "unhideSheet" => {
-                let opts: Vec<String> =
-                    p("sheets").as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
-                let first = opts.first().cloned().unwrap_or_default();
-                let mut d = Dialog::form(
-                    "unhideSheet",
-                    "Unhide",
-                    "sheet.unhide",
-                    vec![Text { key: "sheet", label: "Unhide sheet:" }, Note(format!("Hidden: {}", opts.join(", ")))],
-                    json!({"sheet": first}),
-                );
-                d.values.insert("sheet".into(), json!(first));
-                d
-            }
-            "pasteSpecial" => Dialog::form(
-                "pasteSpecial",
-                "Paste Special",
-                "edit.pasteSpecial",
-                vec![
-                    Choice {
-                        key: "what",
-                        label: "Paste",
-                        options: vec![
-                            ("all", "All"),
-                            ("formulas", "Formulas (F)"),
-                            ("values", "Values (V)"),
-                            ("formats", "Formats (T)"),
-                            ("comments", "Comments and notes (C)"),
-                            ("validation", "Validation"),
-                            ("allExceptBorders", "All except borders"),
-                            ("columnWidths", "Column widths"),
-                            ("formulasAndNumberFormats", "Formulas and number formats"),
-                            ("valuesAndNumberFormats", "Values and number formats"),
-                        ],
-                    },
-                    Choice {
-                        key: "operation",
-                        label: "Operation",
-                        options: vec![("none", "None"), ("add", "Add"), ("subtract", "Subtract"), ("multiply", "Multiply"), ("divide", "Divide")],
-                    },
-                    Check { key: "skipBlanks", label: "Skip blanks" },
-                    Check { key: "transpose", label: "Transpose (E)" },
-                    Check { key: "link", label: "Paste Link" },
-                ],
-                json!({"what": "all", "operation": "none"}),
-            ),
-            "series" => Dialog::form(
-                "series",
-                "Series",
-                "edit.fillSeries",
-                vec![
-                    Choice { key: "direction", label: "Series in", options: vec![("columns", "Columns"), ("rows", "Rows")] },
-                    Choice { key: "type", label: "Type", options: vec![("linear", "Linear"), ("growth", "Growth"), ("date", "Date")] },
-                    Choice {
-                        key: "dateUnit",
-                        label: "Date unit",
-                        options: vec![("day", "Day"), ("weekday", "Weekday"), ("month", "Month"), ("year", "Year")],
-                    },
-                    Number { key: "step", label: "Step value:" },
-                    Text { key: "stop", label: "Stop value:" },
-                ],
-                json!({"direction": "columns", "type": "linear", "dateUnit": "day", "step": 1}),
-            ),
-            "comment" => {
-                let threaded = p("threaded").as_bool().unwrap_or(true);
-                let existing = app
-                    .session
-                    .active()
-                    .and_then(|d| d.wb.active().and_then(|s| s.comments.get(&d.selection.active).map(|c| c.text.clone())))
-                    .unwrap_or_default();
-                Dialog::form(
-                    if threaded { "comment" } else { "note" },
-                    if threaded { "New Comment" } else { "New Note" },
-                    if threaded { "review.newComment" } else { "review.newNote" },
-                    vec![Text { key: "text", label: if threaded { "Start a conversation:" } else { "Note:" } }],
-                    json!({"text": existing}),
-                )
-            }
-            // Asks before a web or e-mail link leaves the workbook; OK runs `link.open`, which
-            // refuses anything but http, https and mailto.
-            "openLink" => {
-                let url = params.get("url").and_then(Json::as_str).unwrap_or_default().to_string();
-                Dialog::form(
-                    "openLink",
-                    "Open Hyperlink",
-                    "link.open",
-                    vec![Note(format!(
-                        "This workbook asks to open the address below. Links can lead to harmful sites or start other programs: open it only if you trust the workbook.\n\n{url}"
-                    ))],
-                    json!({"url": url}),
-                )
-            }
-            "insertLink" => Dialog::form(
-                "insertLink",
-                "Insert Hyperlink",
-                "insert.link",
-                vec![
-                    Text { key: "text", label: "Display:" },
-                    Text { key: "target", label: "Link to (web address, e-mail or Sheet!A1):" },
-                    Text { key: "tooltip", label: "ScreenTip:" },
-                ],
-                json!({"target": "https://"}),
-            ),
-            "sparkline" => Dialog::form(
-                "sparkline",
-                "Create Sparklines",
-                "insert.sparkline",
-                vec![
-                    Text { key: "range", label: "Data Range:" },
-                    Text { key: "location", label: "Location Range:" },
-                    Check { key: "markers", label: "Markers" },
-                ],
-                json!({"range": sel, "location": active, "type": p("type")}),
-            ),
-            "headerFooter" => Dialog::form(
-                "headerFooter",
-                "Header & Footer",
-                "pageLayout.headerFooter",
-                vec![
-                    Text { key: "header", label: "Header (&L left, &C center, &R right; &P page, &N pages, &D date, &A sheet):" },
-                    Text { key: "footer", label: "Footer:" },
-                ],
-                json!({"header": "", "footer": "&CPage &P of &N"}),
-            ),
-            "pageSetup" => {
-                // Opens on the active sheet's saved margins, so OK without edits rewrites them unchanged.
-                let m = app.session.active().and_then(|d| d.wb.active()).map(|s| s.print.margins).unwrap_or([0.7, 0.7, 0.75, 0.75, 0.3, 0.3]);
-                // Round off f32 noise so the form shows 0.1, not 0.10000000149.
-                let [left, right, top, bottom, header, footer] = m.map(|v| (f64::from(v) * 1e4).round() / 1e4);
-                Dialog::form(
-                    "pageSetup",
-                    "Page Setup",
-                    "pageLayout.margins",
-                    vec![
-                        Number { key: "left", label: "Left margin (in):" },
-                        Number { key: "right", label: "Right margin (in):" },
-                        Number { key: "top", label: "Top margin (in):" },
-                        Number { key: "bottom", label: "Bottom margin (in):" },
-                        Number { key: "header", label: "Header (in):" },
-                        Number { key: "footer", label: "Footer (in):" },
-                    ],
-                    json!({"left": left, "right": right, "top": top, "bottom": bottom, "header": header, "footer": footer}),
-                )
-            }
-            "textToColumns" => Dialog::form(
-                "textToColumns",
-                "Convert Text to Columns",
-                "data.textToColumns",
-                vec![
-                    Check { key: "tab", label: "Tab" },
-                    Check { key: "semicolon", label: "Semicolon" },
-                    Check { key: "comma", label: "Comma" },
-                    Check { key: "space", label: "Space" },
-                    Text { key: "other", label: "Other:" },
-                    Check { key: "treatConsecutive", label: "Treat consecutive delimiters as one" },
-                    Text { key: "destination", label: "Destination:" },
-                ],
-                json!({"tab": true, "comma": true, "destination": active}),
-            ),
-            "removeDuplicates" => Dialog::form(
-                "removeDuplicates",
-                "Remove Duplicates",
-                "data.removeDuplicates",
-                vec![Check { key: "header", label: "My data has headers" }, Text { key: "columnsText", label: "Columns (blank = all, e.g. A,C):" }],
-                json!({"header": true}),
-            ),
             "goalSeek" => Dialog::custom("goalSeek", "Goal Seek", json!({"set": active, "to": "0", "changing": ""})),
-            "forecastSheet" => Dialog::form(
-                "forecastSheet",
-                "Create Forecast Worksheet",
-                "data.forecastSheet",
-                vec![
-                    Text { key: "timeline", label: "Timeline range (blank: first column of the selection):" },
-                    Text { key: "values", label: "Values range (blank: second column of the selection):" },
-                    Text { key: "end", label: "Forecast end (date or number; blank: a third of the history):" },
-                    Text { key: "forecastStart", label: "Forecast start (a date or number in the history; blank: after the last point):" },
-                    Check { key: "confidenceInterval", label: "Confidence interval" },
-                    Text { key: "confidence", label: "Confidence level (%):" },
-                    Text { key: "seasonality", label: "Seasonality (auto, 0 for none, or a season length):" },
-                    Choice {
-                        key: "fillMissing",
-                        label: "Fill missing points using",
-                        options: vec![("interpolate", "Interpolation"), ("zeros", "Zeros")],
-                    },
-                    Choice {
-                        key: "aggregate",
-                        label: "Aggregate duplicates using",
-                        options: vec![
-                            ("average", "Average"),
-                            ("count", "Count"),
-                            ("counta", "CountA"),
-                            ("max", "Max"),
-                            ("median", "Median"),
-                            ("min", "Min"),
-                            ("sum", "Sum"),
-                        ],
-                    },
-                    Check { key: "statistics", label: "Include forecast statistics" },
-                    Choice { key: "chart", label: "Chart", options: vec![("line", "Line chart"), ("column", "Column chart")] },
-                ],
-                json!({"confidenceInterval": true, "confidence": "95", "seasonality": "auto", "fillMissing": "interpolate", "aggregate": "average", "chart": "line"}),
-            ),
             "analysisToolPak" => {
                 // Opened with a known `tool`, it goes straight to that tool's form.
                 let tool = params.get("tool").and_then(Json::as_str).unwrap_or("");
@@ -500,128 +134,6 @@ impl Dialog {
                 d
             }
             "solverResults" => Dialog::custom("solverResults", "Solver Results", params.clone()),
-            "subtotal" => Dialog::form(
-                "subtotal",
-                "Subtotal",
-                "data.subtotal",
-                vec![
-                    Text { key: "groupBy", label: "At each change in (column letter):" },
-                    Choice {
-                        key: "function",
-                        label: "Use function",
-                        options: vec![
-                            ("sum", "Sum"),
-                            ("count", "Count"),
-                            ("average", "Average"),
-                            ("max", "Max"),
-                            ("min", "Min"),
-                            ("product", "Product"),
-                        ],
-                    },
-                    Text { key: "columnsText", label: "Add subtotal to (columns, e.g. C,D):" },
-                ],
-                json!({"groupBy": "A", "function": "sum"}),
-            ),
-            "zoom" => Dialog::form(
-                "zoom",
-                "Zoom",
-                "view.zoom",
-                vec![
-                    Choice {
-                        key: "preset",
-                        label: "Magnification",
-                        options: vec![("200", "200%"), ("100", "100%"), ("75", "75%"), ("50", "50%"), ("25", "25%")],
-                    },
-                    Number { key: "percent", label: "Custom (%):" },
-                ],
-                json!({"percent": app.session.active().and_then(|d| d.wb.active().map(|s| s.zoom)).unwrap_or(100)}),
-            ),
-            "defineName" => {
-                // Name Manager › Edit… passes the name being edited (`oldName`, `oldScope`) and
-                // its current fields; New… and Define Name start from the selection.
-                let editing = params.get("oldName").and_then(Json::as_str).is_some();
-                let selection = app.session.active().and_then(|d| {
-                    d.wb.active().map(|s| format!("={}!{}", gridcraft_engine::formula::quote_sheet(&s.name), abs(&d.selection.current())))
-                });
-                let mut defaults = json!({"scope": "Workbook", "refersTo": selection});
-                for key in ["name", "scope", "comment", "refersTo", "oldName", "oldScope"] {
-                    if let Some(v) = params.get(key).filter(|v| v.is_string()) {
-                        defaults[key] = v.clone();
-                    }
-                }
-                Dialog::form(
-                    "defineName",
-                    if editing { "Edit Name" } else { "New Name" },
-                    "formulas.defineName",
-                    vec![
-                        Text { key: "name", label: "Name:" },
-                        Text { key: "scope", label: "Scope (Workbook or sheet name):" },
-                        Text { key: "comment", label: "Comment:" },
-                        Text { key: "refersTo", label: "Refers to:" },
-                    ],
-                    defaults,
-                )
-            }
-            "dataValidation" => Dialog::form(
-                "dataValidation",
-                "Data Validation",
-                "data.validation",
-                data_validation_fields("any", "between"),
-                validation_defaults(app),
-            ),
-            "cfQuick" => {
-                let ty = p("type").as_str().unwrap_or("cellIs").to_string();
-                let title = p("title").as_str().unwrap_or("Conditional Formatting").to_string();
-                let mut fields = vec![];
-                match ty.as_str() {
-                    "cellIs" => {
-                        fields.push(Text { key: "value", label: "Format cells that are (value):" });
-                        if p("operator").as_str() == Some("between") {
-                            fields.push(Text { key: "value2", label: "and:" });
-                        }
-                    }
-                    "containsText" => fields.push(Text { key: "text", label: "Format cells that contain the text:" }),
-                    "timePeriod" => fields.push(Choice {
-                        key: "period",
-                        label: "Format cells that contain a date occurring:",
-                        options: vec![
-                            ("yesterday", "Yesterday"),
-                            ("today", "Today"),
-                            ("tomorrow", "Tomorrow"),
-                            ("last7Days", "In the last 7 days"),
-                            ("lastWeek", "Last week"),
-                            ("thisWeek", "This week"),
-                            ("nextWeek", "Next week"),
-                            ("lastMonth", "Last month"),
-                            ("thisMonth", "This month"),
-                            ("nextMonth", "Next month"),
-                        ],
-                    }),
-                    _ => fields.push(Text { key: "formula", label: "Format values where this formula is true:" }),
-                }
-                fields.push(Choice {
-                    key: "preset",
-                    label: "with",
-                    options: vec![
-                        ("lightRedFillDarkRedText", "Light Red Fill with Dark Red Text"),
-                        ("yellowFillDarkYellowText", "Yellow Fill with Dark Yellow Text"),
-                        ("greenFillDarkGreenText", "Green Fill with Dark Green Text"),
-                        ("lightRedFill", "Light Red Fill"),
-                        ("redText", "Red Text"),
-                        ("redBorder", "Red Border"),
-                    ],
-                });
-                let mut d = Dialog::form(
-                    "cfQuick",
-                    &title,
-                    "home.conditionalFormat",
-                    fields,
-                    json!({"preset": "lightRedFillDarkRedText", "period": "today"}),
-                );
-                d.values.insert("type".into(), json!(ty));
-                d.values.insert("operator".into(), p("operator"));
-                d
-            }
             "formatCells" => {
                 let mut d = Dialog::custom("formatCells", "Format Cells", json!({}));
                 d.tab = p("tab").as_str().unwrap_or("Number").to_string();
@@ -637,37 +149,6 @@ impl Dialog {
                 d
             }
             "goTo" => Dialog::custom("goTo", "Go To", json!({"reference": ""})),
-            "pivotCalculatedField" => Dialog::form(
-                "pivotCalculatedField",
-                "Insert Calculated Field",
-                "pivot.calculatedField",
-                vec![Text { key: "name", label: "Name:" }, Text { key: "formula", label: "Formula:" }],
-                json!({"pivot": p("pivot"), "name": p("name"), "formula": p("formula")}),
-            ),
-            "goToSpecial" => Dialog::form(
-                "goToSpecial",
-                "Go To Special",
-                "edit.goToSpecial",
-                vec![Choice {
-                    key: "kind",
-                    label: "Select",
-                    options: vec![
-                        ("blanks", "Blanks"),
-                        ("constants", "Constants"),
-                        ("formulas", "Formulas"),
-                        ("notes", "Notes"),
-                        ("errors", "Errors"),
-                        ("numbers", "Numbers"),
-                        ("text", "Text"),
-                        ("currentRegion", "Current region"),
-                        ("lastCell", "Last cell"),
-                        ("visible", "Visible cells only"),
-                        ("conditionalFormats", "Conditional formats"),
-                        ("dataValidation", "Data validation"),
-                    ],
-                }],
-                json!({"kind": "blanks"}),
-            ),
             "sort" => Dialog::custom("sort", "Sort", json!({"header": true, "levels": [{"column": "A", "order": "asc"}]})),
             "nameManager" => Dialog::custom("nameManager", "Name Manager", json!({})),
             "manageRules" => Dialog::custom("manageRules", "Conditional Formatting Rules Manager", json!({})),
@@ -750,17 +231,6 @@ impl Dialog {
                 d.result = Some(app.session.run("review.spelling", json!({})).unwrap_or_else(|e| json!({"error": e})));
                 d
             }
-            "chartTitle" => Dialog::form(
-                "chartTitle",
-                "Chart Title",
-                "chart.set",
-                vec![
-                    Text { key: "title", label: "Title:" },
-                    Text { key: "xTitle", label: "Horizontal axis title:" },
-                    Text { key: "yTitle", label: "Vertical axis title:" },
-                ],
-                json!({"chart": p("chart")}),
-            ),
             "insertPicture" => {
                 let placement = params.get("placement").and_then(Json::as_str).unwrap_or("overCells");
                 let mut dialog = Dialog::form(
@@ -799,135 +269,8 @@ impl Dialog {
     }
 }
 
-/// Initial values of the Data Validation form: the rule stored on the active cell, so OK without
-/// edits keeps it; a plain list rule when the cell has none.
-fn validation_defaults(app: &SheetApp) -> Json {
-    let mut v = json!({"type": "list", "operator": "between", "ignoreBlank": true, "dropdown": true, "errorStyle": "stop"});
-    let Some(doc) = app.session.active() else { return v };
-    let Some(dv) = doc.wb.active().and_then(|s| s.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(doc.selection.active)))) else {
-        return v;
-    };
-    // The enums serialize as their variant names; the command takes them in camelCase.
-    let camel = |x: Json| {
-        let name = x.as_str().unwrap_or_default();
-        let mut chars = name.chars();
-        chars.next().map(|c| c.to_lowercase().chain(chars).collect::<String>()).unwrap_or_default()
-    };
-    v["type"] = json!(camel(json!(dv.kind)));
-    v["operator"] = json!(camel(json!(dv.op)));
-    v["errorStyle"] = json!(camel(json!(dv.error_style)));
-    v["formula1"] = json!(dv.f1);
-    if let Some(f2) = &dv.f2 {
-        v["formula2"] = json!(f2);
-    }
-    v["ignoreBlank"] = json!(dv.allow_blank);
-    v["dropdown"] = json!(dv.in_cell_dropdown);
-    v["inputTitle"] = json!(dv.input_title);
-    v["inputMessage"] = json!(dv.input_message);
-    v["errorTitle"] = json!(dv.error_title);
-    v["errorMessage"] = json!(dv.error_message);
-    v
-}
-
-fn abs(r: &gridcraft_engine::core::RangeRef) -> String {
-    let a = |c: gridcraft_engine::core::CellRef| format!("${}${}", gridcraft_engine::core::col_to_letters(c.col), c.row + 1);
-    if r.is_single() { a(r.start) } else { format!("{}:{}", a(r.start), a(r.end)) }
-}
-
-/// The criterion controls in Excel's Settings tab depend on both Allow and Data.
-/// `formula1` is the sole source for a list or custom rule; `formula2` is a
-/// second bound only for Between and Not between.
 fn data_validation_fields(kind: &str, operator: &str) -> Vec<Field> {
-    use Field::*;
-    let mut fields = vec![Choice {
-        key: "type",
-        label: "Allow",
-        options: vec![
-            ("any", "Any value"),
-            ("whole", "Whole number"),
-            ("decimal", "Decimal"),
-            ("list", "List"),
-            ("date", "Date"),
-            ("time", "Time"),
-            ("textLength", "Text length"),
-            ("custom", "Custom"),
-        ],
-    }];
-    let two_bounds = matches!(operator, "between" | "notBetween");
-    match kind {
-        "list" => {
-            fields.push(Text { key: "formula1", label: "Source:" });
-            fields.push(Check { key: "ignoreBlank", label: "Ignore blank" });
-            fields.push(Check { key: "dropdown", label: "In-cell dropdown" });
-        }
-        "custom" => {
-            fields.push(Text { key: "formula1", label: "Formula:" });
-            fields.push(Check { key: "ignoreBlank", label: "Ignore blank" });
-        }
-        "whole" | "decimal" | "date" | "time" | "textLength" => {
-            fields.push(Choice {
-                key: "operator",
-                label: "Data",
-                options: vec![
-                    ("between", "between"),
-                    ("notBetween", "not between"),
-                    ("equal", "equal to"),
-                    ("notEqual", "not equal to"),
-                    ("greater", "greater than"),
-                    ("less", "less than"),
-                    ("greaterOrEqual", "greater than or equal to"),
-                    ("lessOrEqual", "less than or equal to"),
-                ],
-            });
-            let lower = matches!(operator, "greater" | "greaterOrEqual");
-            let (first, second) = match kind {
-                "date" => (
-                    if two_bounds || lower {
-                        "Start date:"
-                    } else if matches!(operator, "less" | "lessOrEqual") {
-                        "End date:"
-                    } else {
-                        "Date:"
-                    },
-                    "End date:",
-                ),
-                "time" => (
-                    if two_bounds || lower {
-                        "Start time:"
-                    } else if matches!(operator, "less" | "lessOrEqual") {
-                        "End time:"
-                    } else {
-                        "Time:"
-                    },
-                    "End time:",
-                ),
-                _ => (
-                    if two_bounds || lower {
-                        "Minimum:"
-                    } else if matches!(operator, "less" | "lessOrEqual") {
-                        "Maximum:"
-                    } else {
-                        "Value:"
-                    },
-                    "Maximum:",
-                ),
-            };
-            fields.push(Text { key: "formula1", label: first });
-            if two_bounds {
-                fields.push(Text { key: "formula2", label: second });
-            }
-            fields.push(Check { key: "ignoreBlank", label: "Ignore blank" });
-        }
-        _ => {}
-    }
-    fields.push(Text { key: "inputMessage", label: "Input message:" });
-    fields.push(Choice {
-        key: "errorStyle",
-        label: "Error style",
-        options: vec![("stop", "Stop"), ("warning", "Warning"), ("information", "Information")],
-    });
-    fields.push(Text { key: "errorMessage", label: "Error message:" });
-    fields
+    gridcraft_engine::forms::data_validation_fields(kind, operator)
 }
 
 fn data_validation_form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
@@ -938,84 +281,9 @@ fn data_validation_form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, o
     ok_cancel(ui, confirm, open);
 }
 
-/// Builds the command params from form values for dialogs that need translation.
+/// The command params for a form's values ([`gridcraft_engine::forms::build_params`]).
 fn build_params(d: &Dialog) -> Json {
-    let mut v = Json::Object(d.values.clone());
-    match d.name.as_str() {
-        "dataValidation" => {
-            let kind = d.values.get("type").and_then(Json::as_str).unwrap_or("any");
-            let operator = d.values.get("operator").and_then(Json::as_str).unwrap_or("between");
-            if let Some(m) = v.as_object_mut() {
-                if !matches!(operator, "between" | "notBetween") || matches!(kind, "any" | "list" | "custom") {
-                    m.remove("formula2");
-                }
-                if matches!(kind, "any" | "list" | "custom") {
-                    m.remove("operator");
-                }
-                if kind == "any" {
-                    m.remove("formula1");
-                }
-                if kind != "list" {
-                    m.remove("dropdown");
-                }
-            }
-        }
-        "textToColumns" => {
-            let mut delims = Vec::new();
-            for (k, c) in [("tab", "\t"), ("semicolon", ";"), ("comma", ","), ("space", " ")] {
-                if d.values.get(k).and_then(Json::as_bool) == Some(true) {
-                    delims.push(json!(c));
-                }
-            }
-            v["delimiters"] = Json::Array(delims);
-        }
-        "removeDuplicates" | "subtotal" => {
-            if let Some(t) = d.values.get("columnsText").and_then(Json::as_str).filter(|t| !t.trim().is_empty()) {
-                v["columns"] = Json::Array(t.split(',').map(|c| json!(c.trim().to_ascii_uppercase())).collect());
-            }
-        }
-        "allowEditRanges" => {
-            if let Some(m) = v.as_object_mut() {
-                // Blank fields mean "unchanged"; the check box clears a password.
-                m.retain(|_, x| x.as_str().is_none_or(|s| !s.trim().is_empty()));
-                if m.remove("removePassword").and_then(|x| x.as_bool()) == Some(true) {
-                    m.insert("password".into(), json!(""));
-                }
-            }
-        }
-        "zoom" => {
-            if let Some(p) = d.values.get("preset").and_then(Json::as_str)
-                && d.values.get("percent").is_none()
-            {
-                v["percent"] = json!(p.parse::<f64>().unwrap_or(100.0));
-            }
-        }
-        "cfQuick" => {
-            let mut rule = Map::new();
-            for (k, val) in &d.values {
-                rule.insert(k.clone(), val.clone());
-            }
-            v = json!({"rule": Json::Object(rule)});
-        }
-        "series" => {
-            if let Some(s) = d.values.get("stop").and_then(Json::as_str).and_then(|s| s.parse::<f64>().ok()) {
-                v["stop"] = json!(s);
-            } else if let Some(m) = v.as_object_mut() {
-                m.remove("stop");
-            }
-        }
-        "defineName" => {
-            if let Some(m) = v.as_object_mut() {
-                for key in ["scope", "oldScope"] {
-                    if m.get(key).and_then(Json::as_str) == Some("Workbook") {
-                        m.remove(key);
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-    v
+    gridcraft_engine::forms::build_params(&d.name, &d.values)
 }
 
 pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
