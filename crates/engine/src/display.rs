@@ -33,6 +33,49 @@ pub fn format(v: &Value, code: &str, wb: &Workbook) -> Formatted {
     format_value(v, &parsed(code), wb.date_system)
 }
 
+/// A formula as the interface shows it in `locale` (Show Formulas, the editor): English
+/// (and every language without a formula table) shows the stored text, and `_xludf.` prefixes
+/// of user-defined calls are hidden.
+pub fn formula_display(text: &str, locale: gridcraft_formula::FormulaLocale, wb: &Workbook, sheet: usize) -> String {
+    use gridcraft_formula as formula;
+    // English skips a parse per frame.
+    if locale == formula::FormulaLocale::En {
+        return hide_udf_prefix(text, locale);
+    }
+    let Some(body) = text.strip_prefix('=') else { return text.to_string() };
+    let shown = formula::parse(body)
+        .and_then(|expr| formula::print_input(&expr, locale, |name| wb.name(name, sheet).is_some() || wb.table(name).is_some()))
+        .map(|body| format!("={body}"))
+        .unwrap_or_else(|_| text.to_string());
+    hide_udf_prefix(&shown, locale)
+}
+
+pub const UDF_PREFIX: &str = "_xludf.";
+
+pub fn has_udf_prefix(text: &str) -> bool {
+    text.to_ascii_lowercase().contains(UDF_PREFIX)
+}
+
+/// Excel shows a user-defined call such as `_xludf.EOMONTH()` as `=EOMONTH()`. Only function
+/// names lose the prefix: text literals and names keep it.
+fn hide_udf_prefix(text: &str, locale: gridcraft_formula::FormulaLocale) -> String {
+    use gridcraft_formula as formula;
+    let Some(body) = text.strip_prefix('=').filter(|b| has_udf_prefix(b)) else { return text.to_string() };
+    let Ok(tokens) = formula::lexer::tokenize_locale(body, locale) else { return text.to_string() };
+    let mut out = String::from("=");
+    let mut from = 0;
+    for t in tokens {
+        if matches!(t.tok, formula::lexer::Tok::Func(_))
+            && body.get(t.start..t.start + UDF_PREFIX.len()).is_some_and(|p| p.eq_ignore_ascii_case(UDF_PREFIX))
+        {
+            out.push_str(body.get(from..t.start).unwrap_or(""));
+            from = t.start + UDF_PREFIX.len();
+        }
+    }
+    out.push_str(body.get(from..).unwrap_or(""));
+    out
+}
+
 /// What the cell editor and the formula bar start from. Same as `Cell::input_text`, except that a
 /// constant number in a date or time format is shown as a date (as the grid shows it), not as its
 /// serial. When the formatted text would not read back as the same date (for example

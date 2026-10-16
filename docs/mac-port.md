@@ -6,7 +6,10 @@ A native macOS frontend in SwiftUI over GridCraft's Rust engine, in a fork of `s
 
 ## Status
 
-**Phase 0: not started.** The fork has been created; the agent instructions have been rewritten for it. Next task: **MAC1.1**.
+**MAC1 in progress.** MAC1.1 (viewport read model) has landed; next task: **MAC1.2**.
+
+- **MAC1.1 done.** `gridcraft_engine::viewport` lays out a block of cells: `viewport(wb, &ViewportRequest, &mut CfCache, &dyn Measure) -> Viewport`, giving `CellView`s (span/merge, fill, data bar, icon, checkbox, picture, `CellText`, border segments, comment mark) plus sparklines and filter buttons. egui's `grid::paint_quadrant` now only places and draws what the model returns (pixel-identical to before on the sample workbooks and a stress sheet at 50/100/175%, frozen panes, Page Layout, right-to-left and Show Formulas). `print.rs` shares its `cell_look`. `display::formula_display` (Show Formulas in the UI's formula language) moved from `ui-egui` into the engine.
+- Follow-up: the PDF printer still lays out its own text (overflow, wrapping) with PDF font metrics. It could use `viewport` with a PDF `Measure`.
 
 ## Decisions
 
@@ -19,6 +22,7 @@ A native macOS frontend in SwiftUI over GridCraft's Rust engine, in a fork of `s
 | 2026-10-17 | Cell appearance and editing rules move into the engine as read models | Avoids two diverging copies (egui and Swift) of Excel behaviour. |
 | 2026-10-17 | SF Symbols allowed through the system API only | Native look; nothing vendor-owned is committed. |
 | 2026-10-17 | Swift app lives in `macos/`, not `apps/` | `apps/*` are Cargo workspace members. |
+| 2026-10-17 | The viewport model measures text through a frontend-supplied `Measure` trait (text, font, size → width) | `####`, General narrowing, Shrink to fit, repeat fills and overflow depend on font metrics only the frontend has. The decisions stay in the engine; egui measures with its painter, Swift will with Core Text (a UniFFI callback interface). Lengths are in screen units (`scale` per sheet unit), relative to the cell; overflow is given as columns, so the frontend maps it with its own geometry. |
 
 ## Phases
 

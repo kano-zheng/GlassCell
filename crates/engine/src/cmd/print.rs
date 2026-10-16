@@ -604,19 +604,7 @@ fn rgb_of(c: Color, wb: &Workbook) -> Option<Rgb> {
     c.resolve(&wb.theme)
 }
 
-fn numfmt_rgb(c: gridcraft_numfmt::FormatColor) -> Rgb {
-    use gridcraft_numfmt::FormatColor as F;
-    match c {
-        F::Black | F::Indexed(_) => [0, 0, 0],
-        F::Blue => [0, 0, 255],
-        F::Cyan => [0, 255, 255],
-        F::Green => [0, 128, 0],
-        F::Magenta => [255, 0, 255],
-        F::Red => [255, 0, 0],
-        F::White => [255, 255, 255],
-        F::Yellow => [255, 255, 0],
-    }
-}
+use crate::viewport::numfmt_rgb;
 
 fn blend(fg: [u8; 4]) -> Rgb {
     let a = fg[3] as u16;
@@ -625,55 +613,10 @@ fn blend(fg: [u8; 4]) -> Rgb {
 }
 
 /// The effective look of a cell: own style, table style, conditional formats.
-struct Look {
-    style: Style,
-    fill: Option<Rgb>,
-    cf: Option<crate::cf::CfLook>,
-}
+type Look = crate::viewport::CellLook;
 
 fn cell_look(wb: &Workbook, si: usize, sh: &Sheet, c: CellRef, cf: &mut Option<crate::cf::CfCache>) -> Look {
-    let mut style = match sh.table_at(c) {
-        Some(t) => crate::tables::table_cell_style(wb, si, t, c),
-        None => wb.styles.get(sh.style_id(c)).clone(),
-    };
-    let cfl = cf.as_mut().and_then(|cache| cache.look(wb, si, c));
-    if let Some(st) = cfl.as_ref().and_then(|l| l.style.as_ref()) {
-        if st.fill.pattern != PatternType::None {
-            style.fill = st.fill;
-        }
-        if st.font.color != Color::Auto {
-            style.font.color = st.font.color;
-        }
-        style.font.bold |= st.font.bold;
-        style.font.italic |= st.font.italic;
-        style.font.strike |= st.font.strike;
-        if st.font.underline != Underline::None {
-            style.font.underline = st.font.underline;
-        }
-        for (dst, src) in [
-            (&mut style.borders.left, st.borders.left),
-            (&mut style.borders.right, st.borders.right),
-            (&mut style.borders.top, st.borders.top),
-            (&mut style.borders.bottom, st.borders.bottom),
-        ] {
-            if !src.is_none() {
-                *dst = src;
-            }
-        }
-    }
-    let mut fill = match style.fill.pattern {
-        PatternType::None => None,
-        PatternType::Solid => rgb_of(style.fill.fg, wb),
-        _ => {
-            let fg = rgb_of(style.fill.fg, wb).unwrap_or([0, 0, 0]);
-            let bg = rgb_of(style.fill.bg, wb).unwrap_or([255, 255, 255]);
-            Some([0, 1, 2].map(|i| ((fg[i] as u16 + bg[i] as u16 * 3) / 4) as u8))
-        }
-    };
-    if let Some(rgb) = cfl.as_ref().and_then(|l| l.scale_fill) {
-        fill = Some(rgb);
-    }
-    Look { style, fill, cf: cfl }
+    crate::viewport::cell_look(wb, si, sh, c, cf.as_mut())
 }
 
 /// PDF measurement for chart layout.

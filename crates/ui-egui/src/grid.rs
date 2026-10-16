@@ -6,9 +6,10 @@
 use std::sync::Arc;
 
 use egui::{Align2, Color32, CursorIcon, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
-use gridcraft_engine::cf::{CfCache, CfLook};
-use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value, col_to_letters};
-use gridcraft_engine::model::{BorderLine, BorderStyle, Color, HAlign, LineIndex, PatternType, Sheet, Style, Underline, VAlign, Workbook};
+use gridcraft_engine::cf::CfCache;
+use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef, col_to_letters};
+use gridcraft_engine::model::{BorderStyle, HAlign, LineIndex, PatternType, Sheet, Underline, VAlign, Workbook};
+use gridcraft_engine::viewport::{self, CellText, CommentMark, Edge, Measure, TextLayout, ViewportRequest};
 use serde_json::json;
 
 use crate::SheetApp;
@@ -420,136 +421,17 @@ impl Geo {
     }
 }
 
-/// Resolved look of a cell for painting.
-struct Look {
-    style: Style,
-    fill: Option<Color32>,
-    text_color: Color32,
-}
+/// Text widths for the engine's viewport layout, measured with the fonts egui paints with.
+struct PainterMeasure<'a>(&'a Painter);
 
-fn col32(c: Color, wb: &Workbook, default: Color32) -> Color32 {
-    c.resolve(&wb.theme).map(theme::color32).unwrap_or(default)
-}
-
-fn numfmt_color(c: gridcraft_engine::numfmt::FormatColor) -> Color32 {
-    use gridcraft_engine::numfmt::FormatColor as F;
-    match c {
-        F::Black => Color32::BLACK,
-        F::Blue => Color32::from_rgb(0, 0, 255),
-        F::Cyan => Color32::from_rgb(0, 255, 255),
-        F::Green => Color32::from_rgb(0, 128, 0),
-        F::Magenta => Color32::from_rgb(255, 0, 255),
-        F::Red => Color32::from_rgb(255, 0, 0),
-        F::White => Color32::WHITE,
-        F::Yellow => Color32::from_rgb(255, 255, 0),
-        F::Indexed(_) => Color32::BLACK,
+impl Measure for PainterMeasure<'_> {
+    fn text_width(&self, text: &str, font: &gridcraft_engine::model::Font, size: f32) -> f32 {
+        self.0.layout_no_wrap(text.to_string(), cell_font(font, size), Color32::PLACEHOLDER).size().x
     }
 }
 
-/// Last column of a Center Across Selection run starting at `start`: it extends over following columns (up to `limit`) while `continues` holds.
-fn center_across_end(start: u32, limit: u32, continues: impl Fn(u32) -> bool) -> u32 {
-    let mut end = start;
-    while end < limit && end + 1 < MAX_COLS && continues(end + 1) {
-        end += 1;
-    }
-    end
-}
-
-fn look(wb: &Workbook, si: usize, sh: &Sheet, c: CellRef, cf: &mut CfCache) -> (Look, Option<CfLook>) {
-    let mut style = wb.styles.get(sh.style_id(c)).clone();
-    if let Some(t) = sh.table_at(c) {
-        style = gridcraft_engine::tables::table_cell_style(wb, si, t, c);
-    }
-    let cfl = cf.look(wb, si, c);
-    if let Some(l) = &cfl
-        && let Some(st) = &l.style
-    {
-        if st.fill.pattern != PatternType::None {
-            style.fill = st.fill;
-        }
-        if st.font.color != Color::Auto {
-            style.font.color = st.font.color;
-        }
-        if st.font.bold {
-            style.font.bold = true;
-        }
-        if st.font.italic {
-            style.font.italic = true;
-        }
-        if st.font.underline != Underline::None {
-            style.font.underline = st.font.underline;
-        }
-        if st.font.strike {
-            style.font.strike = true;
-        }
-        for (dst, src) in [
-            (&mut style.borders.left, st.borders.left),
-            (&mut style.borders.right, st.borders.right),
-            (&mut style.borders.top, st.borders.top),
-            (&mut style.borders.bottom, st.borders.bottom),
-        ] {
-            if !src.is_none() {
-                *dst = src;
-            }
-        }
-    }
-    let mut fill = match style.fill.pattern {
-        PatternType::None => None,
-        PatternType::Solid => style.fill.fg.resolve(&wb.theme).map(theme::color32),
-        _ => {
-            // Patterns: approximate with a blend of foreground and background.
-            let fg = style.fill.fg.resolve(&wb.theme).unwrap_or([0, 0, 0]);
-            let bg = style.fill.bg.resolve(&wb.theme).unwrap_or([255, 255, 255]);
-            Some(Color32::from_rgb(
-                ((fg[0] as u16 + bg[0] as u16 * 3) / 4) as u8,
-                ((fg[1] as u16 + bg[1] as u16 * 3) / 4) as u8,
-                ((fg[2] as u16 + bg[2] as u16 * 3) / 4) as u8,
-            ))
-        }
-    };
-    if let Some(l) = &cfl
-        && let Some(rgb) = l.scale_fill
-    {
-        fill = Some(theme::color32(rgb));
-    }
-    let text_color = col32(style.font.color, wb, Color32::BLACK);
-    (Look { style, fill, text_color }, cfl)
-}
-
-/// Text for a value with General narrowing to the available width.
-fn display_text(
-    wb: &Workbook,
-    sh: &Sheet,
-    c: CellRef,
-    v: &Value,
-    st: &Style,
-    width_px: f32,
-    char_w: f32,
-) -> (String, Option<Color32>, bool, Option<(char, usize)>) {
-    if sh.show_formulas
-        && let Some(f) = sh.cell(c).and_then(|x| x.formula.as_ref())
-    {
-        return (format!("={}", f.text), None, false, None);
-    }
-    if !sh.show_zeros && v.as_f64() == Some(0.0) {
-        return (String::new(), None, false, None);
-    }
-    let code = st.num_fmt.as_str();
-    // A checkbox cell draws TRUE/FALSE (and empty) as a box; other values show as General.
-    if code == "checkbox" && matches!(v, Value::Bool(_) | Value::Empty) {
-        return (String::new(), None, false, None);
-    }
-    if code == "General"
-        && let Value::Number(n) = v
-    {
-        let max_chars = ((width_px - 4.0) / char_w).floor().max(1.0) as usize;
-        return match gridcraft_engine::numfmt::format_general_fit(*n, max_chars.min(11)) {
-            Some(t) => (t, None, true, None),
-            None => ("#".repeat(max_chars.max(1)), None, true, None),
-        };
-    }
-    let f = gridcraft_engine::display::format(v, code, wb);
-    (f.text, f.color.map(numfmt_color), f.numeric, f.fill)
+fn cell_font(font: &gridcraft_engine::model::Font, size: f32) -> FontId {
+    FontId::new(size, theme::cell_family(&font.name, font.bold, font.italic))
 }
 
 pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
@@ -1034,9 +916,6 @@ pub(crate) fn paint_quadrant(
     let z = geo.z;
     let (r0, r1) = rows;
     let (c0, c1) = cols;
-    let range = RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1));
-    let merges: Vec<RangeRef> = sh.merges.iter().filter(|m| m.intersects(&range)).copied().collect();
-    let in_merge = |c: CellRef| merges.iter().find(|m| m.contains(c)).copied();
     // Gridlines.
     if sh.show_gridlines {
         let stroke = Stroke::new(1.0, t.gridline);
@@ -1059,50 +938,30 @@ pub(crate) fn paint_quadrant(
             p.line_segment([pos2(left, y), pos2(right, y)], stroke);
         }
     }
-    // Merged areas: blank them (no inner gridlines) and paint as one cell.
-    let mut cells: Vec<CellRef> = Vec::new();
-    for r in r0..=r1 {
-        if sh.row_height(r) == 0.0 {
-            continue;
-        }
-        for c in c0..=c1 {
-            if sh.col_width(c) == 0.0 {
-                continue;
-            }
-            cells.push(CellRef::new(r, c));
-        }
-    }
-    let empty_ok = |c: CellRef| -> bool { sh.value_ref(c).is_none_or(Value::is_empty) && in_merge(c).is_none() };
-    // Backgrounds.
-    let mut looks: Vec<(CellRef, Rect, Look, Option<CfLook>)> = Vec::with_capacity(cells.len().min(20_000));
-    for &c in &cells {
-        let (rect, anchor) = match in_merge(c) {
-            Some(m) if m.start != c && !(c.row == r0.max(m.start.row) && c.col == c0.max(m.start.col)) => continue,
-            Some(m) => (geo.range_rect(sh, m), m.start),
-            None => (geo.cell_rect(sh, c), c),
-        };
-        let (lk, cfl) = look(wb, si, sh, anchor, cf);
-        if let Some(f) = lk.fill {
-            p.rect_filled(rect.expand(0.0), 0.0, f);
-        } else if in_merge(c).is_some() {
+    let req = ViewportRequest { sheet: si, rows, cols, scale: z, formula_locale: crate::i18n::current(p.ctx()).formula_locale() };
+    let vp = viewport::viewport(wb, &req, cf, &PainterMeasure(p));
+    let rects: Vec<Rect> = vp.cells.iter().map(|v| geo.range_rect(sh, v.span)).collect();
+    // Backgrounds; merged areas are blanked (no inner gridlines) and painted as one cell.
+    for (v, rect) in vp.cells.iter().zip(&rects) {
+        if let Some(f) = v.fill {
+            p.rect_filled(*rect, 0.0, theme::color32(f));
+        } else if v.merged {
             p.rect_filled(rect.shrink(0.5), 0.0, Color32::WHITE);
         }
-        looks.push((anchor, rect, lk, cfl));
     }
     // Text and per-cell decorations.
-    for (c, rect, lk, cfl) in &looks {
-        let c = *c;
-        if let Some(picture) = sh.cell_pictures.get(&c) {
-            crate::cell_pictures::paint(p, *rect, picture);
+    for (v, rect) in vp.cells.iter().zip(&rects) {
+        if v.picture {
+            if let Some(picture) = sh.cell_pictures.get(&v.cell) {
+                crate::cell_pictures::paint(p, *rect, picture);
+            }
             continue;
         }
-        let v = sh.value(c);
-        if let Some(l) = cfl
-            && let Some((frac, rgb, gradient)) = l.bar
-        {
-            let bar = Rect::from_min_size(pos2(rect.left() + 2.0, rect.top() + 2.0), vec2((rect.width() - 4.0) * frac, rect.height() - 4.0));
-            let col = theme::color32(rgb);
-            if gradient {
+        if let Some(b) = v.data_bar {
+            let bar = Rect::from_min_size(pos2(rect.left() + 2.0, rect.top() + 2.0), vec2((rect.width() - 4.0) * b.fraction, rect.height() - 4.0));
+            let col = theme::color32(b.color);
+            if b.gradient {
+                let rgb = b.color;
                 let mut mesh = egui::Mesh::default();
                 let light = Color32::from_rgb(
                     ((rgb[0] as u16 + 255 * 3) / 4) as u8,
@@ -1121,18 +980,13 @@ pub(crate) fn paint_quadrant(
                 p.rect_filled(bar, 0.0, col);
             }
         }
-        let mut text_left = rect.left();
-        if let Some(l) = cfl
-            && let Some((set, idx)) = &l.icon
-        {
+        if let Some(icon) = &v.icon {
             let r = Rect::from_min_size(pos2(rect.left() + 2.0, rect.center().y - 6.0 * z), vec2(12.0 * z, 12.0 * z));
-            paint_cf_icon(p, r, set, *idx);
-            text_left += 15.0 * z;
+            paint_cf_icon(p, r, &icon.set, icon.index);
         }
-        if lk.style.num_fmt.as_str() == "checkbox" && matches!(v, Value::Bool(_) | Value::Empty) {
+        if let Some(on) = v.checkbox {
             let s = (11.0 * z * 1.2).clamp(8.0, 24.0);
             let b = Rect::from_center_size(rect.center(), vec2(s, s));
-            let on = v == Value::Bool(true);
             p.rect_filled(b, 2.0, if on { Color32::from_rgb(0x10, 0x7C, 0x41) } else { Color32::WHITE });
             p.rect_stroke(
                 b,
@@ -1145,207 +999,29 @@ pub(crate) fn paint_quadrant(
             }
             continue;
         }
-        if cfl.as_ref().is_some_and(|l| l.hide_value) || v.is_empty() {
-            continue;
-        }
-        // Align and clip header text inside the content area, away from the dropdown.
-        let filter_space = sh.filter_button_space(c) * z;
-        let text_rect = Rect::from_min_max(rect.min, pos2((rect.right() - filter_space).max(rect.left()), rect.bottom()));
-        let rect = &text_rect;
-        let st = &lk.style;
-        let size = st.font.size * 96.0 / 72.0 * z;
-        let fam = theme::cell_family(&st.font.name, st.font.bold, st.font.italic);
-        let font = FontId::new(size, fam);
-        // Digits fit by the cell's own font and size, not the default 11pt (9pt marks in narrow columns).
-        let char_w = p.layout_no_wrap("0".to_string(), font.clone(), Color32::PLACEHOLDER).size().x.max(1.0);
-        let avail_w = rect.right() - text_left;
-        let (mut text, ncolor, numeric, fill_char) = display_text(wb, sh, c, &v, st, avail_w / z.max(0.1) * z, char_w);
-        if sh.show_formulas && sh.cell(c).is_some_and(|cell| cell.formula.is_some()) {
-            text = crate::formula_locale::display(&text, crate::i18n::current(p.ctx()).formula_locale(), wb, si);
-        }
-        if text.is_empty() {
-            continue;
-        }
-        let color = ncolor.unwrap_or(lk.text_color);
-        let halign = match st.align.h {
-            HAlign::General => match v {
-                Value::Number(_) => HAlign::Right,
-                Value::Bool(_) | Value::Error(_) => HAlign::Center,
-                _ if numeric => HAlign::Right,
-                _ => HAlign::Left,
-            },
-            h => h,
-        };
-        let indent = st.align.indent as f32 * 9.0 * z;
-        let pad = 2.5 * z;
-        let rotated = st.align.rotation != 0 && st.align.rotation != 255;
-        // Rotated text wraps along its own direction (below), not across the column width.
-        if !rotated && (st.align.wrap || st.align.h == HAlign::Justify) {
-            let wrap_w = (rect.width() - 2.0 * pad - indent).max(4.0);
-            let mut job = egui::text::LayoutJob::simple(text.clone(), font.clone(), color, wrap_w);
-            job.halign = match halign {
-                HAlign::Center | HAlign::CenterAcross => egui::Align::Center,
-                HAlign::Right => egui::Align::RIGHT,
-                _ => egui::Align::LEFT,
-            };
-            let galley = p.layout_job(job);
-            let x = match halign {
-                HAlign::Center | HAlign::CenterAcross => rect.center().x,
-                HAlign::Right => rect.right() - pad,
-                _ => text_left + pad + indent,
-            };
-            let y = wrapped_cell_text_y(st.align.v, *rect, galley.size().y, z);
-            p.with_clip_rect(rect.intersect(p.clip_rect())).galley(pos2(x, y), galley, color);
-            continue;
-        }
-        let first_line = text.lines().next().unwrap_or("").to_string();
-        // Shrink to fit: too-wide content is drawn in a smaller font so it fits the cell (or the
-        // merged area): it neither spills, nor is clipped, nor turns into ####.
-        let small = (st.align.shrink && !rotated && st.align.h != HAlign::Fill && fill_char.is_none())
-            .then(|| shrink_font(p, &first_line, &font, avail_w - 2.0 * pad - indent))
-            .flatten();
-        let shrunk = small.is_some();
-        let font = small.unwrap_or(font);
-        let mut galley = p.layout_no_wrap(first_line.clone(), font.clone(), color);
-        let mut w = galley.size().x;
-        // Numbers and dates never overflow: they show #### when too narrow.
-        if !shrunk && (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
-            let n = ((avail_w - 2.0 * pad) / char_w).floor().max(1.0) as usize;
-            galley = p.layout_no_wrap("#".repeat(n), font.clone(), color);
-            w = galley.size().x;
-        }
-        // Repeat fill (`*` in number formats) / Fill alignment.
-        if let Some((ch, pos)) = fill_char
-            && pos <= first_line.len()
-        {
-            let base_w = w;
-            let cw = p.layout_no_wrap(ch.to_string(), font.clone(), color).size().x.max(1.0);
-            let n = (((avail_w - 2.0 * pad) - base_w) / cw).floor().max(0.0) as usize;
-            let mut s = first_line.clone();
-            if first_line.is_char_boundary(pos) {
-                s.insert_str(pos, &ch.to_string().repeat(n));
-            }
-            galley = p.layout_no_wrap(s, font.clone(), color);
-            w = galley.size().x;
-        }
-        // Center Across Selection: the text is centred over this cell and the empty cells to its right that also use it.
-        let across_end = if halign == HAlign::CenterAcross && !rotated && in_merge(c).is_none() {
-            center_across_end(c.col, c1 + 20, |col| {
-                let n = CellRef::new(c.row, col);
-                empty_ok(n) && wb.styles.get(sh.style_id(n)).align.h == HAlign::CenterAcross
-            })
-        } else {
-            c.col
-        };
-        // Overflow into empty neighbours for text (not upright text, whose width is its line height).
-        let mut clip = *rect;
-        let overflows = !numeric && !matches!(v, Value::Number(_)) && st.align.rotation.abs() != 90 && w > rect.width() - 2.0 * pad;
-        if filter_space == 0.0 && (overflows || across_end > c.col) && in_merge(c).is_none() {
-            let mut right = rect.right();
-            let mut left = rect.left();
-            if across_end > c.col {
-                right = geo.x(sh, across_end + 1);
-            }
-            if matches!(halign, HAlign::Left | HAlign::Center | HAlign::Justify) {
-                let mut cc = c.col + 1;
-                while right - rect.left() < w + 2.0 * pad && cc < MAX_COLS && empty_ok(CellRef::new(c.row, cc)) && cc <= c1 + 20 {
-                    right = geo.x(sh, cc + 1);
-                    cc += 1;
-                }
-            }
-            if matches!(halign, HAlign::Right | HAlign::Center) {
-                let mut cc = c.col;
-                while rect.right() - left < w + 2.0 * pad && cc > 0 && empty_ok(CellRef::new(c.row, cc - 1)) && cc + 20 > c0 {
-                    cc -= 1;
-                    left = geo.x(sh, cc);
-                }
-            }
-            clip = Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
-            // Paint over the gridlines the text passes through.
-            if lk.fill.is_none() {
-                let inner = Rect::from_min_max(pos2(clip.left() + 1.0, clip.top() + 0.5), pos2(clip.right() - 1.0, clip.bottom() - 1.0));
-                let extra_l = Rect::from_min_max(inner.min, pos2(rect.left() + 1.0, inner.bottom()));
-                let extra_r = Rect::from_min_max(pos2(rect.right() - 1.0, inner.top()), inner.max);
-                if extra_l.width() > 0.0 {
-                    p.rect_filled(extra_l, 0.0, t.grid_bg);
-                }
-                if extra_r.width() > 0.0 {
-                    p.rect_filled(extra_r, 0.0, t.grid_bg);
-                }
-            }
-        }
-        let x = match halign {
-            HAlign::CenterAcross => clip.center().x - w / 2.0,
-            HAlign::Center | HAlign::Distributed => rect.center().x - w / 2.0,
-            HAlign::Right => rect.right() - pad - w - indent,
-            _ => text_left + pad + indent,
-        };
-        let gh = galley.size().y;
-        let y = cell_text_y(st.align.v, *rect, gh, z);
-        let cp = p.with_clip_rect(clip.intersect(p.clip_rect()));
-        if rotated {
-            let angle = -(st.align.rotation as f32).to_radians();
-            // Upright (±90°) wrapped text wraps to the row height: lines then stack across the column.
-            let galley = if st.align.wrap && st.align.rotation.abs() == 90 {
-                let job = egui::text::LayoutJob::simple(text.clone(), font.clone(), color, (rect.height() - 2.0 * pad).max(4.0));
-                p.layout_job(job)
-            } else {
-                galley.clone()
-            };
-            let pos = rotated_text_pos(*rect, galley.size(), angle, st.align.h, st.align.v, pad, indent);
-            let mut shape = egui::epaint::TextShape::new(pos, galley, color);
-            shape.angle = angle;
-            cp.add(shape);
-        } else {
-            cp.galley(pos2(x, y), galley.clone(), color);
-        }
-        let baseline = y + gh * 0.82;
-        match st.font.underline {
-            Underline::None => {}
-            Underline::Double | Underline::DoubleAccounting => {
-                cp.line_segment([pos2(x, baseline + 1.0), pos2(x + w, baseline + 1.0)], Stroke::new(1.0, color));
-                cp.line_segment([pos2(x, baseline + 3.0), pos2(x + w, baseline + 3.0)], Stroke::new(1.0, color));
-            }
-            _ => {
-                cp.line_segment([pos2(x, baseline + 1.0), pos2(x + w, baseline + 1.0)], Stroke::new(1.0, color));
-            }
-        }
-        if st.font.strike {
-            cp.line_segment([pos2(x, y + gh * 0.55), pos2(x + w, y + gh * 0.55)], Stroke::new(1.0, color));
+        if let Some(text) = &v.text {
+            paint_cell_text(p, geo, sh, *rect, text, t);
         }
     }
     // Borders (over fills and text).
-    for (c, rect, lk, _) in &looks {
-        let b = &lk.style.borders;
-        let merge = merges.iter().find(|m| m.start == *c);
-        let edges = match merge {
-            // A merged area's outline lives on the cells along each of its edges (Excel writes the
-            // right edge on the last column's cells and the bottom edge on the last row's), so each
-            // edge is drawn cell by cell from the cell it belongs to.
-            Some(m) => merged_edges(wb, si, sh, geo, *m, *rect, (r0, r1), (c0, c1), cf),
-            None => vec![
-                (b.top, [rect.left_top(), rect.right_top()]),
-                (b.bottom, [rect.left_bottom(), rect.right_bottom()]),
-                (b.left, [rect.left_top(), rect.left_bottom()]),
-                (b.right, [rect.right_top(), rect.right_bottom()]),
-            ],
-        };
-        for (line, pts) in edges {
-            if line.is_none() {
-                continue;
-            }
-            let col = col32(line.color, wb, Color32::BLACK);
-            paint_border(p, pts, line.style, col);
-        }
-        if !b.diag_down.is_none() {
-            paint_border(p, [rect.left_top(), rect.right_bottom()], b.diag_down.style, col32(b.diag_down.color, wb, Color32::BLACK));
-        }
-        if !b.diag_up.is_none() {
-            paint_border(p, [rect.left_bottom(), rect.right_top()], b.diag_up.style, col32(b.diag_up.color, wb, Color32::BLACK));
+    for (v, rect) in vp.cells.iter().zip(&rects) {
+        for b in &v.borders {
+            // A merged area's edges come in segments, one per visible cell along them.
+            let (x0, x1) = if v.merged { (geo.x(sh, b.from), geo.x(sh, b.to.saturating_add(1))) } else { (rect.left(), rect.right()) };
+            let (y0, y1) = if v.merged { (geo.y(sh, b.from), geo.y(sh, b.to.saturating_add(1))) } else { (rect.top(), rect.bottom()) };
+            let pts = match b.edge {
+                Edge::Top => [pos2(x0, rect.top()), pos2(x1, rect.top())],
+                Edge::Bottom => [pos2(x0, rect.bottom()), pos2(x1, rect.bottom())],
+                Edge::Left => [pos2(rect.left(), y0), pos2(rect.left(), y1)],
+                Edge::Right => [pos2(rect.right(), y0), pos2(rect.right(), y1)],
+                Edge::DiagDown => [rect.left_top(), rect.right_bottom()],
+                Edge::DiagUp => [rect.left_bottom(), rect.right_top()],
+            };
+            paint_border(p, pts, b.style, theme::color32(b.color));
         }
         // Comment / note indicator.
-        if let Some(cm) = sh.comments.get(c) {
-            let tri_col = if cm.threaded { Color32::from_rgb(0x88, 0x55, 0xC8) } else { Color32::from_rgb(0xD0, 0x2E, 0x2E) };
+        if let Some(mark) = v.comment {
+            let tri_col = if mark == CommentMark::Threaded { Color32::from_rgb(0x88, 0x55, 0xC8) } else { Color32::from_rgb(0xD0, 0x2E, 0x2E) };
             let s = 6.0 * z.max(0.7);
             p.add(egui::Shape::convex_polygon(
                 vec![rect.right_top(), pos2(rect.right(), rect.top() + s), pos2(rect.right() - s, rect.top())],
@@ -1355,42 +1031,91 @@ pub(crate) fn paint_quadrant(
         }
     }
     // Sparklines.
-    for sp in &sh.sparklines {
-        if !range.contains(sp.cell) {
-            continue;
-        }
+    for sp in &vp.sparklines {
         let rect = geo.cell_rect(sh, sp.cell).shrink(3.0);
-        let vals: Vec<Option<f64>> = match gridcraft_engine::calc::evaluate(wb, si, sp.cell, &sp.source) {
-            Value::Array(a) => a.data.iter().map(Value::as_f64).collect(),
-            v => vec![v.as_f64()],
-        };
-        let col = sp.color.resolve(&wb.theme).unwrap_or([0x2B, 0x7C, 0xD3]);
-        let prims = gridcraft_chart::render_sparkline(sp.kind, &vals, [col[0], col[1], col[2], 255], sp.markers, rect.width(), rect.height());
+        let [r, g, b] = sp.color;
+        let prims = gridcraft_chart::render_sparkline(sp.kind, &sp.values, [r, g, b, 255], sp.markers, rect.width(), rect.height());
         crate::chartview::paint_prims(p, rect.min, &prims, 1.0);
     }
     // Filter buttons.
-    let mut buttons: Vec<(CellRef, bool)> = Vec::new();
-    if let Some(af) = &sh.autofilter {
-        for col in af.range.start.col..=af.range.end.col {
-            let active = af.criteria.iter().any(|(o, _)| af.range.start.col + o == col);
-            buttons.push((CellRef::new(af.range.start.row, col), active));
-        }
-    }
-    for tb in &sh.tables {
-        if tb.filter_button && tb.header_row {
-            for col in tb.range.start.col..=tb.range.end.col {
-                buttons.push((CellRef::new(tb.range.start.row, col), false));
-            }
-        }
-    }
-    for (c, active) in buttons {
-        if !range.contains(c) {
-            continue;
-        }
-        let r = filter_button_rect(geo, sh, c);
+    for b in &vp.filter_buttons {
+        let r = filter_button_rect(geo, sh, b.cell);
         p.rect_filled(r, 2.0, Color32::from_gray(250));
         p.rect_stroke(r, 2.0, Stroke::new(1.0, Color32::from_gray(170)), StrokeKind::Inside);
-        crate::icons::paint(p, r.shrink(1.5), if active { crate::icons::Icon::Filter } else { crate::icons::Icon::Chevron }, Color32::from_gray(70));
+        crate::icons::paint(
+            p,
+            r.shrink(1.5),
+            if b.active { crate::icons::Icon::Filter } else { crate::icons::Icon::Chevron },
+            Color32::from_gray(70),
+        );
+    }
+}
+
+/// Places and draws a cell's text as the engine laid it out within `rect` (the cell or merged area).
+fn paint_cell_text(p: &Painter, geo: &Geo, sh: &Sheet, rect: Rect, tx: &CellText, t: &Tokens) {
+    let z = geo.z;
+    let font = cell_font(&tx.font, tx.size);
+    let color = theme::color32(tx.color);
+    // The content area stops before a filter button.
+    let area = Rect::from_min_max(rect.min, pos2(rect.left() + tx.right, rect.bottom()));
+    if let TextLayout::Wrap { width, anchor } = tx.layout {
+        let mut job = egui::text::LayoutJob::simple(tx.text.clone(), font, color, width);
+        job.halign = match tx.halign {
+            HAlign::Center | HAlign::CenterAcross => egui::Align::Center,
+            HAlign::Right => egui::Align::RIGHT,
+            _ => egui::Align::LEFT,
+        };
+        let galley = p.layout_job(job);
+        let y = wrapped_cell_text_y(tx.align.v, area, galley.size().y, z);
+        p.with_clip_rect(area.intersect(p.clip_rect())).galley(pos2(rect.left() + anchor, y), galley, color);
+        return;
+    }
+    let clip = match tx.spill {
+        Some((lo, hi)) => Rect::from_min_max(pos2(geo.x(sh, lo), rect.top()), pos2(geo.x(sh, hi.saturating_add(1)), rect.bottom())),
+        None => area,
+    };
+    // Paint over the gridlines the text passes through.
+    if tx.cover_gridlines {
+        let inner = Rect::from_min_max(pos2(clip.left() + 1.0, clip.top() + 0.5), pos2(clip.right() - 1.0, clip.bottom() - 1.0));
+        let extra_l = Rect::from_min_max(inner.min, pos2(area.left() + 1.0, inner.bottom()));
+        let extra_r = Rect::from_min_max(pos2(area.right() - 1.0, inner.top()), inner.max);
+        if extra_l.width() > 0.0 {
+            p.rect_filled(extra_l, 0.0, t.grid_bg);
+        }
+        if extra_r.width() > 0.0 {
+            p.rect_filled(extra_r, 0.0, t.grid_bg);
+        }
+    }
+    let galley = match tx.layout {
+        TextLayout::Rotated { wrap: Some(w) } => p.layout_job(egui::text::LayoutJob::simple(tx.text.clone(), font, color, w)),
+        _ => p.layout_no_wrap(tx.text.clone(), font, color),
+    };
+    let (x, w) = (rect.left() + tx.x, tx.width);
+    let gh = galley.size().y;
+    let y = cell_text_y(tx.align.v, area, gh, z);
+    let cp = p.with_clip_rect(clip.intersect(p.clip_rect()));
+    if let TextLayout::Rotated { .. } = tx.layout {
+        let angle = -(tx.align.rotation as f32).to_radians();
+        let pos = rotated_text_pos(area, galley.size(), angle, tx.align.h, tx.align.v, tx.pad, tx.indent);
+        let mut shape = egui::epaint::TextShape::new(pos, galley, color);
+        shape.angle = angle;
+        cp.add(shape);
+    } else {
+        cp.galley(pos2(x, y), galley, color);
+    }
+    let baseline = y + gh * 0.82;
+    match tx.font.underline {
+        Underline::None => {}
+        Underline::Double | Underline::DoubleAccounting => {
+            cp.line_segment([pos2(x, baseline + 1.0), pos2(x + w, baseline + 1.0)], Stroke::new(1.0, color));
+            cp.line_segment([pos2(x, baseline + 3.0), pos2(x + w, baseline + 3.0)], Stroke::new(1.0, color));
+        }
+        _ => {
+            cp.line_segment([pos2(x, baseline + 1.0), pos2(x + w, baseline + 1.0)], Stroke::new(1.0, color));
+        }
+    }
+    if tx.font.strike {
+        cp.line_segment([pos2(x, y + gh * 0.55), pos2(x + w, y + gh * 0.55)], Stroke::new(1.0, color));
     }
 }
 
@@ -1400,60 +1125,6 @@ pub fn filter_button_rect(geo: &Geo, sh: &Sheet, c: CellRef) -> Rect {
     let pad = 2.0 * geo.z;
     let s = (rect.height() - 4.0).clamp(10.0, 18.0).min((sh.filter_button_space(c) * geo.z - pad).max(0.0));
     Rect::from_min_size(pos2(rect.right() - s - pad, rect.bottom() - s - pad), vec2(s, s))
-}
-
-/// The outline segments of merged area `m` drawn at `rect`: the top and left edges come from the
-/// first row's and first column's cells, the bottom and right edges from the last row's and last
-/// column's cells, one segment per visible cell (limited to the visible `rows` × `cols`).
-#[allow(clippy::too_many_arguments)]
-fn merged_edges(
-    wb: &Workbook,
-    si: usize,
-    sh: &Sheet,
-    geo: &Geo,
-    m: RangeRef,
-    rect: Rect,
-    rows: (u32, u32),
-    cols: (u32, u32),
-    cf: &mut CfCache,
-) -> Vec<(BorderLine, [Pos2; 2])> {
-    let mut out = Vec::new();
-    let (cs, ce) = (m.start.col.max(cols.0), m.end.col.min(cols.1));
-    for col in cs..=ce {
-        if sh.col_width(col) == 0.0 {
-            continue;
-        }
-        let (x0, x1) = (geo.x(sh, col), geo.x(sh, col.saturating_add(1)));
-        let top = look(wb, si, sh, CellRef::new(m.start.row, col), cf).0.style.borders.top;
-        let bottom = look(wb, si, sh, CellRef::new(m.end.row, col), cf).0.style.borders.bottom;
-        out.push((top, [pos2(x0, rect.top()), pos2(x1, rect.top())]));
-        out.push((bottom, [pos2(x0, rect.bottom()), pos2(x1, rect.bottom())]));
-    }
-    let (rs, re) = (m.start.row.max(rows.0), m.end.row.min(rows.1));
-    for row in rs..=re {
-        if sh.row_height(row) == 0.0 {
-            continue;
-        }
-        let (y0, y1) = (geo.y(sh, row), geo.y(sh, row.saturating_add(1)));
-        let left = look(wb, si, sh, CellRef::new(row, m.start.col), cf).0.style.borders.left;
-        let right = look(wb, si, sh, CellRef::new(row, m.end.col), cf).0.style.borders.right;
-        out.push((left, [pos2(rect.left(), y0), pos2(rect.left(), y1)]));
-        out.push((right, [pos2(rect.right(), y0), pos2(rect.right(), y1)]));
-    }
-    out
-}
-
-/// The smaller font that makes `text` fit in `room` points of width (Shrink to fit), or `None`
-/// when it already fits at its own size.
-fn shrink_font(p: &Painter, text: &str, font: &FontId, room: f32) -> Option<FontId> {
-    let natural = p.layout_no_wrap(text.to_string(), font.clone(), Color32::PLACEHOLDER).size().x;
-    let room = room.max(1.0);
-    if natural.is_nan() || natural <= room {
-        return None;
-    }
-    // Glyph advances don't scale exactly linearly (rounding), so leave a little slack.
-    let size = (font.size * room / natural * 0.97).max(1.0);
-    Some(FontId::new(size, font.family.clone()))
 }
 
 pub(crate) fn paint_border(p: &Painter, pts: [Pos2; 2], style: BorderStyle, col: Color32) {
@@ -3397,13 +3068,6 @@ mod tests {
         assert_eq!(zoom_glide_step(100, 120, 5.0), 120);
         assert_eq!(zoom_glide_step(120, 120, 0.5), 120);
         assert_eq!(zoom_glide_step(0, 10, 0.5), 3);
-    }
-
-    #[test]
-    fn center_across_run_stops_at_first_non_continuing_column() {
-        assert_eq!(center_across_end(0, 20, |c| c <= 2), 2);
-        assert_eq!(center_across_end(0, 20, |_| false), 0);
-        assert_eq!(center_across_end(0, 1, |_| true), 1);
     }
 
     #[test]

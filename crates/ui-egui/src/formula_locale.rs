@@ -48,43 +48,10 @@ pub(crate) fn canonical(
 }
 
 pub(crate) fn display(text: &str, locale: FormulaLocale, wb: &Workbook, sheet: usize) -> String {
-    // English (and every language without a formula table) shows the stored text, `_xludf.`
-    // prefixes aside, and skips a parse per frame.
-    if locale == FormulaLocale::En {
-        return hide_udf_prefix(text, locale);
-    }
-    let Some(body) = text.strip_prefix('=') else { return text.to_string() };
-    let shown = formula::parse(body)
-        .and_then(|expr| formula::print_input(&expr, locale, |name| wb.name(name, sheet).is_some() || wb.table(name).is_some()))
-        .map(|body| format!("={body}"))
-        .unwrap_or_else(|_| text.to_string());
-    hide_udf_prefix(&shown, locale)
+    gridcraft_engine::display::formula_display(text, locale, wb, sheet)
 }
 
-const UDF_PREFIX: &str = "_xludf.";
-
-fn has_udf_prefix(text: &str) -> bool {
-    text.to_ascii_lowercase().contains(UDF_PREFIX)
-}
-
-/// Excel shows a user-defined call such as `_xludf.EOMONTH()` as `=EOMONTH()`. Only function
-/// names lose the prefix: text literals and names keep it.
-fn hide_udf_prefix(text: &str, locale: FormulaLocale) -> String {
-    let Some(body) = text.strip_prefix('=').filter(|b| has_udf_prefix(b)) else { return text.to_string() };
-    let Ok(tokens) = formula::lexer::tokenize_locale(body, locale) else { return text.to_string() };
-    let mut out = String::from("=");
-    let mut from = 0;
-    for t in tokens {
-        if matches!(t.tok, formula::lexer::Tok::Func(_))
-            && body.get(t.start..t.start + UDF_PREFIX.len()).is_some_and(|p| p.eq_ignore_ascii_case(UDF_PREFIX))
-        {
-            out.push_str(body.get(from..t.start).unwrap_or(""));
-            from = t.start + UDF_PREFIX.len();
-        }
-    }
-    out.push_str(body.get(from..).unwrap_or(""));
-    out
-}
+use gridcraft_engine::display::has_udf_prefix;
 
 // Descriptions/signatures for the supported Spanish function table; untranslated functions
 // retain their English help. Parameter punctuation follows the same locale as entry.

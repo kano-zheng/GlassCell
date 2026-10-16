@@ -21,6 +21,7 @@ pub mod pivot_calc;
 pub mod sample;
 pub mod selection;
 pub mod tables;
+pub mod viewport;
 
 use std::sync::Arc;
 
