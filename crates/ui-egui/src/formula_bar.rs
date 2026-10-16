@@ -118,14 +118,8 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) {
             ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Enter, .. })));
             let target = text.trim().to_string();
             if !target.is_empty() && target != shown {
-                // A new name for the selection, or a place to go.
-                let is_ref = gridcraft_engine::core::RangeRef::parse(target.split('!').next_back().unwrap_or("")).is_some();
-                let known = app.session.active().is_some_and(|d| d.wb.name(&target, d.wb.active_sheet).is_some() || d.wb.table(&target).is_some());
-                let r = if is_ref || known {
-                    app.run("edit.goTo", json!({"reference": target}))
-                } else {
-                    app.run("formulas.defineName", json!({"name": target}))
-                };
+                // A place to go, or a new name for the selection.
+                let r = app.run("edit.nameBox", json!({"text": target}));
                 if let Err(e) = r {
                     app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
                 }
@@ -418,38 +412,7 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
 }
 
 fn cycle_anchor(ed: &mut crate::editor::EditState) {
-    let caret_b = ed.text.char_indices().nth(ed.caret).map(|(i, _)| i).unwrap_or(ed.text.len());
-    for (a, b, ..) in formula_refs(&ed.text) {
-        if a <= caret_b && caret_b <= b {
-            let Some(r) = ed.text.get(a..b) else { return };
-            let cycled: String = r
-                .split(':')
-                .map(|part| {
-                    let p = part.split('!').next_back().unwrap_or(part);
-                    let prefix = &part[..part.len() - p.len()];
-                    let bare = p.replace('$', "");
-                    let letters: String = bare.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
-                    let digits = &bare[letters.len()..];
-                    let state = (p.starts_with('$'), p[letters.len().min(p.len())..].contains('$') || p.trim_start_matches('$').contains('$'));
-                    let next = match state {
-                        (false, false) => format!("${letters}${digits}"),
-                        (true, true) => format!("{letters}${digits}"),
-                        (false, true) => format!("${letters}{digits}"),
-                        (true, false) => format!("{letters}{digits}"),
-                    };
-                    format!("{prefix}{next}")
-                })
-                .collect::<Vec<_>>()
-                .join(":");
-            let (Some(x), Some(y)) = (ed.text.get(..a), ed.text.get(b..)) else { return };
-            ed.text = format!("{x}{cycled}{y}");
-            ed.caret = ed.text.get(..a + cycled.len()).map(|s| s.chars().count()).unwrap_or(ed.caret);
-            ed.caret_to_end = false;
-            ed.request_focus = true;
-            ed.sync_caret = true;
-            return;
-        }
-    }
+    ed.cycle_anchor();
 }
 
 fn function_names() -> Vec<String> {

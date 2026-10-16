@@ -611,6 +611,13 @@ impl SelectionFormat {
 
 // ------------------------------------------------------------------ session
 
+/// Where editing starts: the cell and the text the editor opens with.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct EntryStart {
+    pub cell: CellAddress,
+    pub text: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct History {
     /// Undo labels, most recent first.

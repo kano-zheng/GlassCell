@@ -11,6 +11,7 @@ pub mod cf;
 mod clip_html;
 pub mod cmd;
 pub mod display;
+pub mod entry;
 pub mod fill;
 pub mod formula_locale;
 pub mod geometry;

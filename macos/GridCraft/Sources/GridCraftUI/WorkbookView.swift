@@ -6,9 +6,11 @@ public struct WorkbookView: View {
     @ObservedObject var document: SpreadsheetDocument
     @Environment(\.undoManager) private var undoManager
     @State private var frameTime: Double = 0
+    @State private var editor: EditController
 
     public init(document: SpreadsheetDocument) {
         self.document = document
+        _editor = State(initialValue: EditController(document: document))
     }
 
     private var sheet: SheetInfo? {
@@ -18,7 +20,9 @@ public struct WorkbookView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            GridView(document: document) { ms in
+            FormulaBar(document: document, editor: editor)
+            Divider()
+            GridView(document: document, editor: editor) { ms in
                 frameTime = ms
             }
             Divider()
@@ -33,6 +37,16 @@ public struct WorkbookView: View {
                     }
                 }
                 Spacer()
+                if let notice = document.notice {
+                    Text(notice)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .task(id: notice) {
+                            try? await Task.sleep(for: .seconds(6))
+                            document.notice = nil
+                        }
+                }
                 Text(String(format: "%.1f ms", frameTime))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)

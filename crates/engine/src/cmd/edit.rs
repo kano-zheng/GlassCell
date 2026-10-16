@@ -38,6 +38,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             edit_commit
         ),
+        cmd!(
+            delegate "edit.nameBox",
+            "Name Box",
+            [],
+            None,
+            "{text} → {action: goTo|defineName|none}: a reference, defined name or table goes there (edit.goTo); any other name names the selection (formulas.defineName)",
+            has_doc,
+            name_box
+        ),
         cmd!(noundo "selection.set", "Select", [], None, "{range: \"A1:B2,D4\" | cell, active?: \"A1\", sheet?}", has_doc, selection_set),
         cmd!(noundo "selection.move", "Move Selection", [], None, "{dr, dc, extend?: bool, jump?: bool (Ctrl+arrow), page?: bool}", has_doc, selection_move),
         cmd!(noundo "selection.next", "Next Cell in Selection", [], None, "{forward?: true, byRow?: false} (Enter/Tab inside a selection)", has_doc, selection_next),
@@ -339,6 +348,24 @@ fn range_set_values(s: &mut Session, p: &Json) -> Result<Json> {
         Ok(())
     })?;
     Ok(json!({"cells": count}))
+}
+
+/// The Name Box's Enter: go to a reference or a known name, or name the selection.
+fn name_box(s: &mut Session, p: &Json) -> Result<Json> {
+    let target = str_param(p, "text").ok_or_else(|| bad("edit.nameBox", "missing `text`"))?.trim().to_string();
+    if target.is_empty() {
+        return Ok(json!({"action": "none"}));
+    }
+    let d = s.doc()?;
+    let is_ref = RangeRef::parse(target.rsplit('!').next().unwrap_or("")).is_some();
+    let known = d.wb.name(&target, d.wb.active_sheet).is_some() || d.wb.table(&target).is_some();
+    if is_ref || known {
+        s.execute("edit.goTo", json!({"reference": target}))?;
+        Ok(json!({"action": "goTo"}))
+    } else {
+        s.execute("formulas.defineName", json!({"name": target}))?;
+        Ok(json!({"action": "defineName"}))
+    }
 }
 
 /// Confirms an in-cell or formula-bar entry: the interface's formula syntax becomes canonical,

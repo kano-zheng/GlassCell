@@ -17,8 +17,10 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
     public let engine: Engine
     /// Bumped after every command, so SwiftUI redraws what shows the workbook.
     @Published public private(set) var generation = 0
-    /// Set when the workbook couldn't be created.
+    /// An error to show in an alert.
     @Published public var problem: String?
+    /// A passing remark for the status bar (a Warning or Information validation message).
+    @Published public var notice: String?
 
     /// A new workbook: empty, or one of the engine's samples (`sales`, `budget`, `grades`).
     public init(sample: String? = nil) {

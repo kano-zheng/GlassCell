@@ -17,12 +17,15 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use gridcraft_engine::Session;
 use gridcraft_engine::cf::CfCache;
 use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef};
+use gridcraft_engine::formula_locale::locale_param;
 use gridcraft_engine::model::{self as model, Workbook};
 use gridcraft_engine::viewport::{self as vp, Measure};
 use serde_json::Value as Json;
 
+mod entry;
 mod records;
 
+pub use entry::*;
 pub use records::*;
 
 uniffi::setup_scaffolding!();
@@ -157,6 +160,43 @@ impl Engine {
                 revision: d.revision,
                 dirty: d.is_dirty(),
             })
+        })
+    }
+
+    /// Where editing the active cell starts: the cell (a merged area's first) and its text in
+    /// `locale`'s formula syntax; `None` for a picture cell (typing still replaces it).
+    pub fn edit_start(&self, locale: String) -> Result<Option<EntryStart>, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            let start = gridcraft_engine::entry::start(&d.wb, d.wb.active_sheet, d.selection.active, locale_param(Some(&locale)));
+            Ok(start.map(|(cell, text)| EntryStart { cell: cell.into(), text }))
+        })
+    }
+
+    /// The worksheet functions' names in `locale`, for autocomplete.
+    pub fn function_names(&self, locale: String) -> Result<Vec<String>, FfiError> {
+        guard(|| {
+            let (wb, si) = self.workbook()?;
+            Ok(gridcraft_engine::entry::function_names(&wb, si, locale_param(Some(&locale))))
+        })
+    }
+
+    /// Column AutoComplete for typing `typed` into `cell`: the one entry of its column it completes to.
+    pub fn column_completion(&self, cell: CellAddress, typed: String) -> Result<Option<String>, FfiError> {
+        guard(|| {
+            let (wb, si) = self.workbook()?;
+            let sh = wb.sheet(si).ok_or_else(|| engine_error("no sheet"))?;
+            Ok(gridcraft_engine::entry::column_completion(sh, CellRef::new(row_of(cell.row), col_of(cell.col)), &typed))
+        })
+    }
+
+    /// The reference point mode inserts for `range` on the active sheet, editing a cell on sheet
+    /// `editing_sheet` (sheet-qualified when they differ).
+    pub fn point_reference(&self, range: CellRange, editing_sheet: u32) -> Result<String, FfiError> {
+        guard(|| {
+            let (wb, si) = self.workbook()?;
+            Ok(gridcraft_engine::entry::point_reference(&wb, editing_sheet as usize, si, range.to_engine()))
         })
     }
 

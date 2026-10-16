@@ -14,6 +14,33 @@ public final class GridNSView: NSView {
     /// The last frame's drawing time, in milliseconds.
     public private(set) var lastFrameMilliseconds: Double = 0
     public var onFrame: ((Double) -> Void)?
+    /// The cell edit shared with the formula bar.
+    public var editor: EditController? {
+        didSet {
+            editor?.grid = self
+            editor?.cellEditor = cellEditor
+            cellEditor.controller = editor
+            popup.controller = editor
+        }
+    }
+
+    private lazy var cellEditor: CellTextView = {
+        let view = CellTextView(frame: .zero, formulaBar: false)
+        view.isHidden = true
+        addSubview(view)
+        return view
+    }()
+
+    private lazy var popup: EditorPopupView = {
+        let view = EditorPopupView(frame: .zero)
+        view.isHidden = true
+        view.onPick = { [weak self] index in
+            self?.editor?.acceptAutocomplete(index)
+            self?.cellEditor.sync(force: true)
+        }
+        addSubview(view)
+        return view
+    }()
 
     private let measurer = CoreTextMeasurer()
     private var lastReport: CFAbsoluteTime = 0
@@ -35,6 +62,16 @@ public final class GridNSView: NSView {
         nil
     }
 
+    /// The grid has the keyboard when its window opens (not the Name Box, SwiftUI's first field).
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        Task { @MainActor [weak self] in
+            guard let self, let window = self.window else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
     public override func draw(_ dirtyRect: NSRect) {
         guard let document, let ctx = NSGraphicsContext.current?.cgContext else { return }
         let start = CFAbsoluteTimeGetCurrent()
@@ -47,7 +84,12 @@ public final class GridNSView: NSView {
         }
         var failure: String?
         do {
-            layoutCache = try GridRenderer(engine: document.engine, measurer: measurer).draw(in: ctx, size: bounds.size, scroll: scroll)
+            var renderer = GridRenderer(engine: document.engine, measurer: measurer)
+            renderer.editing = editor?.isEditing == true
+            renderer.formulaLocale = editor?.locale ?? "en"
+            let layout = try renderer.draw(in: ctx, size: bounds.size, scroll: scroll)
+            layoutCache = layout
+            drawReferenceOutlines(ctx, layout: layout)
         } catch {
             failure = error.localizedDescription
         }
@@ -71,11 +113,98 @@ public final class GridNSView: NSView {
         }
     }
 
+    /// While a formula is edited: its references outlined in their colours.
+    private func drawReferenceOutlines(_ ctx: CGContext, layout: GridRenderer.Layout) {
+        guard let editor, editor.isEditing, !editor.references.isEmpty, let sheet = try? document?.engine.sheet(), sheet.index == editor.sheet else { return }
+        let cells = CGRect(x: layout.headerWidth, y: layout.headerHeight, width: bounds.width - layout.headerWidth, height: bounds.height - layout.headerHeight)
+        ctx.saveGState()
+        ctx.clip(to: cells)
+        for reference in editor.references where reference.sheet == nil || reference.sheet?.caseInsensitiveCompare(sheet.name) == .orderedSame {
+            let r = cgRect(layout.geometry.rangeRect(range: reference.range))
+            let color = ReferenceColors.color(reference.color)
+            ctx.setFillColor(color.withAlphaComponent(0.08).cgColor)
+            ctx.fill(r)
+            ctx.setStrokeColor(color.cgColor)
+            ctx.setLineWidth(1.5)
+            ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
+        }
+        ctx.restoreGState()
+    }
+
+    // MARK: - The cell editor
+
+    /// Starts editing the active cell: typing (`event` goes on to the editor, so input methods
+    /// compose from the first key) or F2 / double-click (`event` nil: from its current text).
+    public func beginEditing(with event: NSEvent? = nil) {
+        guard let editor else { return }
+        editor.begin(typing: event == nil ? nil : "")
+        guard editor.isEditing else { return }
+        showEditor()
+        if let event {
+            cellEditor.interpretKeyEvents([event])
+        }
+    }
+
+    private func showEditor() {
+        guard let editor, let document else { return }
+        // The editor writes in the cell's font, at the zoom.
+        if let format = try? document.engine.selectionFormat(), let layout = layoutCache {
+            let size = CGFloat(format.active.fontSize ?? 11) * 96 / 72 * CGFloat(layout.scale)
+            cellEditor.baseFont = NSFont(name: format.active.fontName ?? "", size: size) ?? .systemFont(ofSize: size)
+        }
+        cellEditor.isHidden = false
+        cellEditor.sync(force: true)
+        positionEditor()
+        if !editor.fromFormulaBar {
+            window?.makeFirstResponder(cellEditor)
+        }
+    }
+
+    /// The editor sits over the edited cell and grows to the right with its text.
+    private func positionEditor() {
+        guard let editor, editor.isEditing, let document, let layout = try? GridRenderer(engine: document.engine, measurer: measurer).layout(size: bounds.size, scroll: scroll) else {
+            cellEditor.isHidden = true
+            popup.isHidden = true
+            return
+        }
+        let r = cgRect(layout.geometry.cellRect(cell: editor.cell))
+        cellEditor.layoutManager?.ensureLayout(for: cellEditor.textContainer ?? NSTextContainer())
+        let used = cellEditor.layoutManager?.usedRect(for: cellEditor.textContainer ?? NSTextContainer()).size ?? .zero
+        let width = min(max(r.width, used.width + 12), max(r.width, bounds.width - r.minX))
+        let height = max(r.height, used.height + 4)
+        cellEditor.frame = NSRect(x: r.minX, y: r.minY, width: width, height: height)
+        cellEditor.isHidden = r.maxX < layout.headerWidth || r.minY > bounds.height
+        let size = popup.fittingSize()
+        popup.isHidden = size == .zero || cellEditor.isHidden
+        popup.frame = NSRect(x: r.minX, y: cellEditor.frame.maxY + 2, width: size.width, height: size.height)
+        popup.needsDisplay = true
+    }
+
+    /// The edit's text or caret changed (in the cell or in the formula bar).
+    public func editorChanged() {
+        guard let editor else { return }
+        if editor.isEditing, cellEditor.isHidden {
+            showEditor()
+        }
+        positionEditor()
+        needsDisplay = true
+    }
+
+    /// The edit ended (confirmed or cancelled).
+    public func editorEnded() {
+        cellEditor.isHidden = true
+        popup.isHidden = true
+        window?.makeFirstResponder(self)
+        reveal()
+        needsDisplay = true
+    }
+
     // MARK: - Scrolling and zoom
 
     public func scroll(to point: CGPoint) {
         scroll = CGPoint(x: max(0, point.x), y: max(0, point.y))
         try? document?.engine.storeScroll(scroll: GridCraftUI.point(scroll.x, scroll.y))
+        positionEditor()
         needsDisplay = true
     }
 
@@ -109,7 +238,7 @@ public final class GridNSView: NSView {
 
     /// What a drag that started with the mouse down extends.
     private enum DragKind {
-        case none, cells, rows, columns
+        case none, cells, rows, columns, pointing
     }
 
     private var drag = DragKind.none
@@ -128,6 +257,25 @@ public final class GridNSView: NSView {
         let flags = event.modifierFlags
         keptRanges = flags.contains(.command) ? ((try? document.engine.selection().ranges) ?? []) : []
         let geometry = layout.geometry
+        if let editor, editor.isEditing {
+            let inCells = p.x >= layout.headerWidth && p.y >= layout.headerHeight
+            if inCells, editor.canPoint {
+                // Point mode: the click inserts a reference; a drag extends it.
+                let cell = CellAddress(row: geometry.rowAt(y: Float(p.y)), col: geometry.colAt(x: Float(p.x)))
+                dragAnchor = cell
+                drag = .pointing
+                editor.pointClick(cell)
+                cellEditor.sync(force: true)
+                window?.makeFirstResponder(editor.fromFormulaBar ? editor.formulaBar : cellEditor)
+                return
+            }
+            guard editor.commit() else { return }
+            editorEnded()
+        }
+        if event.clickCount == 2, p.x >= layout.headerWidth, p.y >= layout.headerHeight {
+            beginEditing()
+            return
+        }
         let inColumnHeader = p.y < layout.headerHeight && p.x >= layout.headerWidth
         let inRowHeader = p.x < layout.headerWidth && p.y >= layout.headerHeight
         if p.x < layout.headerWidth && p.y < layout.headerHeight {
@@ -167,6 +315,9 @@ public final class GridNSView: NSView {
         case .cells: select(CellRange(first: dragAnchor, last: cell))
         case .rows: selectRows(dragAnchor.row, cell.row)
         case .columns: selectColumns(dragAnchor.col, cell.col)
+        case .pointing:
+            editor?.pointClick(dragAnchor, extendingTo: cell)
+            cellEditor.sync(force: true)
         case .none: break
         }
         needsDisplay = true
@@ -220,6 +371,23 @@ public final class GridNSView: NSView {
         func move(_ dr: Int, _ dc: Int) {
             document.run("selection.move", ["dr": dr, "dc": dc, "extend": shift, "jump": command])
         }
+        if event.keyCode == 120 {
+            // F2: edit the active cell.
+            beginEditing()
+            return
+        }
+        if event.specialKey == nil, !command, !flags.contains(.control), let chars = event.characters, !chars.isEmpty,
+           chars.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) {
+            // Typing replaces the active cell's content.
+            beginEditing(with: event)
+            return
+        }
+        if event.specialKey == .backspace || event.specialKey == .delete, !command {
+            // Backspace clears the cell and starts editing it.
+            document.run("edit.clearContents")
+            beginEditing(with: nil)
+            return
+        }
         switch event.specialKey {
         case .upArrow?: move(-1, 0)
         case .downArrow?: move(1, 0)
@@ -236,7 +404,7 @@ public final class GridNSView: NSView {
             }
         case .carriageReturn?, .enter?: moveAfterEntry(down: !shift)
         case .tab?: moveAfterEntry(right: !shift)
-        case .deleteForward?, .delete?: document.run("edit.clearContents")
+        case .deleteForward?: document.run("edit.clearContents")
         default:
             super.keyDown(with: event)
             return
@@ -335,16 +503,19 @@ extension GridNSView: NSMenuItemValidation {
 /// The grid in SwiftUI.
 public struct GridView: NSViewRepresentable {
     @ObservedObject var document: SpreadsheetDocument
+    let editor: EditController
     var onFrame: ((Double) -> Void)?
 
-    public init(document: SpreadsheetDocument, onFrame: ((Double) -> Void)? = nil) {
+    public init(document: SpreadsheetDocument, editor: EditController, onFrame: ((Double) -> Void)? = nil) {
         self.document = document
+        self.editor = editor
         self.onFrame = onFrame
     }
 
     public func makeNSView(context: Context) -> GridNSView {
         let view = GridNSView(frame: .zero)
         view.document = document
+        view.editor = editor
         view.onFrame = onFrame
         return view
     }

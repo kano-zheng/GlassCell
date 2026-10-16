@@ -119,3 +119,15 @@ fn history_follows_undoable_commands() {
     e.execute("edit.undo".into(), String::new()).unwrap();
     assert_eq!(e.history().unwrap().redo.first().map(String::as_str), Some("Enter Cell"));
 }
+
+#[test]
+fn editing_starts_from_the_engine_and_commits_through_it() {
+    let e = engine();
+    e.execute("selection.set".into(), r#"{"range": "B2"}"#.into()).unwrap();
+    let start = e.edit_start("en".into()).unwrap().unwrap();
+    assert_eq!((start.cell, start.text.as_str()), (CellAddress { row: 1, col: 1 }, "Quarterly Sales Dashboard"));
+    assert!(e.function_names("es".into()).unwrap().iter().any(|n| n == "SUMA"));
+    let r = CellRange { first: CellAddress { row: 0, col: 0 }, last: CellAddress { row: 1, col: 1 } };
+    assert_eq!(e.point_reference(r, 0).unwrap(), "A1:B2");
+    assert_eq!(e.column_completion(CellAddress { row: 10, col: 1 }, "Nor".into()).unwrap().as_deref(), Some("North"));
+}

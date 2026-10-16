@@ -17,6 +17,8 @@ public struct GridRenderer {
     public let measurer: CoreTextMeasurer
     /// The interface's formula syntax for Show Formulas (`en`, `es`).
     public var formulaLocale = "en"
+    /// A cell is being edited: no fill handle.
+    public var editing = false
 
     public init(engine: Engine, measurer: CoreTextMeasurer) {
         self.engine = engine
@@ -64,7 +66,7 @@ public struct GridRenderer {
         ctx.fill(CGRect(origin: .zero, size: size))
         for pane in geometry.panes() {
             ctx.saveGState()
-            ctx.clip(to: rect(pane.rect))
+            ctx.clip(to: cgRect(pane.rect))
             if sheet.showGridlines {
                 drawGridlines(ctx, pane: pane, geometry: geometry, scale: layout.scale)
             }
@@ -115,7 +117,7 @@ public struct GridRenderer {
 
     private func drawCells(_ ctx: CGContext, viewport: Viewport, geometry: GridGeometry, scale: Float) {
         let z = CGFloat(scale)
-        let rects = viewport.cells.map { rect(geometry.rangeRect(range: $0.span)) }
+        let rects = viewport.cells.map { cgRect(geometry.rangeRect(range: $0.span)) }
         // Fills; merged areas are blanked (no inner gridlines) and painted as one cell.
         for (cell, r) in zip(viewport.cells, rects) {
             if let fill = cell.fill {
@@ -159,10 +161,10 @@ public struct GridRenderer {
             }
         }
         for sparkline in viewport.sparklines {
-            drawSparkline(ctx, sparkline, in: rect(geometry.cellRect(cell: sparkline.cell)).insetBy(dx: 3, dy: 3))
+            drawSparkline(ctx, sparkline, in: cgRect(geometry.cellRect(cell: sparkline.cell)).insetBy(dx: 3, dy: 3))
         }
         for button in viewport.filterButtons {
-            drawFilterButton(ctx, active: button.active, in: rect(geometry.filterButton(cell: button.cell)))
+            drawFilterButton(ctx, active: button.active, in: cgRect(geometry.filterButton(cell: button.cell)))
         }
     }
 
@@ -468,16 +470,16 @@ public struct GridRenderer {
     private func drawSelection(_ ctx: CGContext, selection: SelectionState, geometry: GridGeometry, pane: GridPane) {
         ctx.setFillColor(Palette.selectionFill)
         for range in selection.ranges where !(range.first == range.last) {
-            ctx.fill(rect(geometry.rangeRect(range: range)))
+            ctx.fill(cgRect(geometry.rangeRect(range: range)))
         }
         guard let current = selection.ranges.last else { return }
-        let outline = rect(geometry.rangeRect(range: current))
+        let outline = cgRect(geometry.rangeRect(range: current))
         ctx.setStrokeColor(Palette.accent)
         ctx.setLineWidth(2)
         ctx.stroke(outline)
         // The fill handle, in the pane that shows the selection's corner.
-        let handle = rect(geometry.fillHandle())
-        if geometry.rangePanes(range: CellRange(first: current.last, last: current.last)).contains(where: { rect($0) == rect(pane.rect) }) {
+        let handle = cgRect(geometry.fillHandle())
+        if !editing, geometry.rangePanes(range: CellRange(first: current.last, last: current.last)).contains(where: { cgRect($0) == cgRect(pane.rect) }) {
             ctx.setFillColor(Palette.accent)
             ctx.fill(handle.insetBy(dx: 1.5, dy: 1.5))
         }
@@ -485,7 +487,7 @@ public struct GridRenderer {
 
     private func drawFrozenLines(_ ctx: CGContext, geometry: GridGeometry, size: CGSize) {
         let frozen = geometry.frozen(), extent = geometry.frozenSize()
-        let cells = geometry.panes().first.map { rect($0.rect) } ?? .zero
+        let cells = geometry.panes().first.map { cgRect($0.rect) } ?? .zero
         ctx.setStrokeColor(Palette.frozenLine)
         ctx.setLineWidth(1)
         if frozen.row > 0 {
@@ -623,7 +625,7 @@ public struct GridRenderer {
 
 // MARK: - Conversions
 
-func rect(_ r: GridRect) -> CGRect {
+func cgRect(_ r: GridRect) -> CGRect {
     CGRect(x: CGFloat(r.x), y: CGFloat(r.y), width: CGFloat(r.width), height: CGFloat(r.height))
 }
 

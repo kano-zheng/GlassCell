@@ -3359,3 +3359,16 @@ fn autosave_is_due_for_a_changed_workbook_with_an_xlsx_file() {
     s.active_mut().unwrap().path = Some("/tmp/book.csv".into());
     assert!(!s.doc().unwrap().autosave_due(), "CSV loses formatting: never autosaved");
 }
+
+#[test]
+fn the_name_box_goes_to_references_and_names_the_selection_otherwise() {
+    let mut s = s();
+    assert_eq!(s.execute("edit.nameBox", json!({"text": "C7"})).unwrap()["action"], "goTo");
+    assert_eq!(s.doc().unwrap().selection.active, CellRef::parse("C7").unwrap());
+    s.execute("selection.set", json!({"range": "A1:B2"})).unwrap();
+    assert_eq!(s.execute("edit.nameBox", json!({"text": "Block"})).unwrap()["action"], "defineName");
+    s.execute("selection.set", json!({"range": "D9"})).unwrap();
+    assert_eq!(s.execute("edit.nameBox", json!({"text": "Block"})).unwrap()["action"], "goTo");
+    assert_eq!(s.doc().unwrap().selection.active, CellRef::parse("A1").unwrap());
+    assert_eq!(s.execute("edit.nameBox", json!({"text": "  "})).unwrap()["action"], "none");
+}

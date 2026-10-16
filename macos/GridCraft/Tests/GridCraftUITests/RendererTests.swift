@@ -20,7 +20,7 @@ import Testing
         let size = CGSize(width: 800, height: 500)
         let layout = try renderer.draw(in: try context(size), size: size, scroll: .zero)
         #expect(layout.headerWidth > 0 && layout.headerHeight > 0)
-        let b2 = rect(layout.geometry.cellRect(cell: CellAddress(row: 1, col: 1)))
+        let b2 = cgRect(layout.geometry.cellRect(cell: CellAddress(row: 1, col: 1)))
         #expect(layout.geometry.hit(x: Float(b2.midX), y: Float(b2.midY)) == .cell(cell: CellAddress(row: 1, col: 1)))
     }
 

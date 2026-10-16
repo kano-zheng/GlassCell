@@ -798,21 +798,13 @@ impl SheetApp {
         }
         let Some(d) = self.session.active() else { return };
         let Some(sh) = d.wb.active() else { return };
-        let at = sh.merge_at(d.selection.active).map(|m| m.start).unwrap_or(d.selection.active);
-        // A picture has no editable scalar text. Selecting it, F2, or clicking
-        // the formula bar must not turn its fallback value into a text edit.
-        // Typing still starts an intentional replacement.
-        if text.is_none() && sh.cell_pictures.contains_key(&at) {
-            return;
-        }
         let locale = self.ui.language.formula_locale();
-        let current = if sh.cell_pictures.contains_key(&at) {
-            String::new()
-        } else {
-            match sh.cell(at) {
-                Some(c) if c.formula.is_some() => formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet),
-                _ => gridcraft_engine::display::edit_text(&d.wb, sh, at),
-            }
+        // A picture has no editable scalar text. Selecting it, F2, or clicking the formula bar
+        // must not turn its fallback value into a text edit; typing still replaces it.
+        let (at, current) = match gridcraft_engine::entry::start(&d.wb, d.wb.active_sheet, d.selection.active, locale) {
+            Some(start) => start,
+            None if text.is_some() => (sh.merge_at(d.selection.active).map(|m| m.start).unwrap_or(d.selection.active), String::new()),
+            None => return,
         };
         let (text, replace) = match text {
             Some(t) => (t, true),

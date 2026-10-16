@@ -3,9 +3,10 @@
 
 use egui::Color32;
 use gridcraft_engine::core::{CellRef, RangeRef};
+use gridcraft_engine::entry;
 
 /// Colours for references in a formula being edited (our own palette).
-pub const REF_COLORS: [Color32; 8] = [
+pub const REF_COLORS: [Color32; entry::REF_COLOR_COUNT] = [
     Color32::from_rgb(0x2E, 0x6F, 0xD8),
     Color32::from_rgb(0xD0, 0x3C, 0x3C),
     Color32::from_rgb(0x7A, 0x4F, 0xC9),
@@ -66,228 +67,64 @@ impl EditState {
     }
 
     pub fn is_formula(&self) -> bool {
-        self.text.starts_with('=')
-            || (self.text.starts_with('+') && self.text.len() > 1)
-            || (self.text.starts_with('-') && self.text.len() > 1 && !self.text[1..].starts_with(|c: char| c.is_ascii_digit()))
-    }
-
-    fn byte_caret(&self) -> usize {
-        self.text.char_indices().nth(self.caret).map(|(i, _)| i).unwrap_or(self.text.len())
+        entry::is_formula(&self.text)
     }
 
     /// Point mode: the caret follows an operator, `(`, `,` or `=` in a formula, so clicking a
     /// cell or pressing an arrow inserts a reference.
     pub fn can_point(&self) -> bool {
-        if !self.is_formula() {
-            return false;
-        }
-        if let Some((_, e)) = self.point
-            && e == self.byte_caret()
-        {
-            return true;
-        }
-        let before = self.text.get(..self.byte_caret()).unwrap_or("");
-        let last = before.trim_end().chars().last();
-        matches!(last, Some('=' | '(' | ',' | '+' | '-' | '*' | '/' | '^' | '&' | '<' | '>' | ':' | ';' | '{'))
+        entry::can_point(&self.text, self.caret, self.point)
     }
 
     /// Inserts (or replaces the last pointed) reference text at the caret.
     pub fn insert_ref(&mut self, r: &str) {
-        let caret_b = self.byte_caret();
-        let (start, end) = match self.point {
-            Some((s, e)) if e == caret_b => (s, e),
-            _ => (caret_b, caret_b),
-        };
-        let (Some(a), Some(b)) = (self.text.get(..start), self.text.get(end..)) else { return };
-        self.text = format!("{a}{r}{b}");
-        let new_end = start + r.len();
-        self.point = Some((start, new_end));
-        self.caret = self.text.get(..new_end).map(|s| s.chars().count()).unwrap_or(0);
-        self.caret_to_end = false;
-        self.sync_caret = true;
+        self.apply(entry::insert_ref(&self.text, self.caret, self.point, r));
     }
 
     /// Updates function autocomplete for the word before the caret.
     pub fn update_autocomplete(&mut self, names: &[String]) {
-        self.autocomplete.clear();
-        if !self.is_formula() {
-            return;
-        }
-        let before = self.text.get(..self.byte_caret()).unwrap_or("");
-        let word: String =
-            before.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_').collect::<String>().chars().rev().collect();
-        if word.is_empty() || word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-            return;
-        }
-        let u = word.to_ascii_uppercase();
-        // Not after a column letter of a reference like A1 (digits follow) – fine either way.
-        self.autocomplete = names.iter().filter(|n| n.starts_with(&u)).take(12).cloned().collect();
-        if self.autocomplete.len() == 1 && self.autocomplete[0] == u {
-            self.autocomplete.clear();
-        }
+        self.autocomplete = entry::autocomplete(&self.text, self.caret, names);
         self.ac_index = self.ac_index.min(self.autocomplete.len().saturating_sub(1));
     }
 
     /// Accepts the highlighted autocomplete entry: replaces the word and adds `(`.
     pub fn accept_autocomplete(&mut self) -> bool {
         let Some(name) = self.autocomplete.get(self.ac_index).cloned() else { return false };
-        let caret_b = self.byte_caret();
-        let before = self.text.get(..caret_b).unwrap_or("");
-        let wlen: usize = before.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_').map(char::len_utf8).sum();
-        let start = caret_b - wlen;
-        let (Some(a), Some(b)) = (self.text.get(..start), self.text.get(caret_b..)) else { return false };
-        self.text = format!("{a}{name}({b}");
-        self.caret = self.text.get(..start + name.len() + 1).map(|s| s.chars().count()).unwrap_or(0);
+        self.apply(entry::accept_autocomplete(&self.text, self.caret, &name));
+        self.point = None;
         self.autocomplete.clear();
-        self.caret_to_end = false;
-        self.sync_caret = true;
         true
+    }
+
+    /// F4: cycles the `$` anchors of the reference at the caret.
+    pub fn cycle_anchor(&mut self) {
+        if let Some(e) = entry::cycle_anchor(&self.text, self.caret) {
+            self.apply(e);
+            self.request_focus = true;
+        }
     }
 
     /// The function call the caret is inside and the argument index (for the hint tooltip).
     pub fn current_function(&self) -> Option<(String, usize)> {
-        if !self.is_formula() {
-            return None;
-        }
-        let before = self.text.get(..self.byte_caret())?;
-        let mut depth = 0i32;
-        let mut arg = 0usize;
-        let chars: Vec<char> = before.chars().collect();
-        let mut in_str = false;
-        let mut i = chars.len();
-        while i > 0 {
-            i -= 1;
-            let c = chars[i];
-            if c == '"' {
-                in_str = !in_str;
-                continue;
-            }
-            if in_str {
-                continue;
-            }
-            match c {
-                ')' | '}' | ']' => depth += 1,
-                '{' | '[' => depth -= 1,
-                '(' => {
-                    if depth == 0 {
-                        let name: String = chars[..i]
-                            .iter()
-                            .rev()
-                            .take_while(|c| c.is_ascii_alphanumeric() || **c == '.' || **c == '_')
-                            .collect::<String>()
-                            .chars()
-                            .rev()
-                            .collect();
-                        if name.is_empty() {
-                            return None;
-                        }
-                        return Some((name.to_ascii_uppercase(), arg));
-                    }
-                    depth -= 1;
-                }
-                c if c == self.locale.list_separator() && depth == 0 => arg += 1,
-                _ => {}
-            }
-        }
-        None
+        entry::current_function(&self.text, self.caret, self.locale)
+    }
+
+    fn apply(&mut self, e: entry::Edit) {
+        self.text = e.text;
+        self.caret = e.caret;
+        self.point = e.point;
+        self.caret_to_end = false;
+        self.sync_caret = true;
     }
 }
 
 /// References in formula text with their byte spans and colour index (same reference text ⇒
 /// same colour), for colouring the editor and outlining ranges on the grid.
 pub fn formula_refs(text: &str) -> Vec<(usize, usize, RangeRef, Option<String>, usize)> {
-    let body = text.strip_prefix('=').or_else(|| text.strip_prefix('+')).unwrap_or(text);
-    let offset = text.len() - body.len();
-    let Ok(toks) = gridcraft_engine::formula::lexer::tokenize(body) else { return vec![] };
-    let mut out: Vec<(usize, usize, RangeRef, Option<String>, usize)> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
-    let mut i = 0;
-    while i < toks.len() {
-        use gridcraft_engine::formula::lexer::Tok;
-        let (sheet, start, j) = match &toks[i].tok {
-            Tok::Sheet(a, _) => (Some(a.clone()), toks[i].start, i + 1),
-            _ => (None, toks[i].start, i),
-        };
-        if let Some(Tok::Word(w)) = toks.get(j).map(|t| &t.tok)
-            && let Some(c) = CellRef::parse(w)
-        {
-            let mut end = toks[j].end;
-            let mut range = RangeRef::cell(c);
-            if let (Some(Tok::Colon | Tok::Trim(_)), Some(Tok::Word(w2))) = (toks.get(j + 1).map(|t| &t.tok), toks.get(j + 2).map(|t| &t.tok))
-                && let Some(c2) = CellRef::parse(w2)
-            {
-                range = RangeRef::new(c, c2);
-                end = toks[j + 2].end;
-                i = j + 3;
-            } else {
-                i = j + 1;
-            }
-            let key = body.get(start..end).unwrap_or("").replace('$', "").to_ascii_uppercase();
-            let idx = match seen.iter().position(|k| *k == key) {
-                Some(k) => k,
-                None => {
-                    seen.push(key);
-                    seen.len() - 1
-                }
-            };
-            out.push((start + offset, end + offset, range, sheet, idx % REF_COLORS.len()));
-            continue;
-        }
-        i += 1;
-    }
-    out
+    entry::formula_refs(text).into_iter().map(|r| (r.start, r.end, r.range, r.sheet, r.color)).collect()
 }
 
-/// Excel-style AutoComplete: the one distinct text entry in the same column (contiguous data
-/// above and below) that starts with `typed` (case-insensitive). `None` when ambiguous.
-pub fn column_completion(sheet: &gridcraft_engine::model::Sheet, at: CellRef, typed: &str) -> Option<String> {
-    if typed.is_empty() || typed.starts_with('=') || typed.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
-        return None;
-    }
-    let lower = typed.to_lowercase();
-    let mut found: Option<String> = None;
-    let mut ambiguous = false;
-    let mut scan = |row: u32| -> bool {
-        match sheet.value(CellRef::new(row, at.col)) {
-            gridcraft_engine::core::Value::Empty => false,
-            gridcraft_engine::core::Value::Text(t) => {
-                let folded = t.to_lowercase();
-                if folded.starts_with(&lower) && folded.len() > lower.len() {
-                    match &found {
-                        Some(f) if f.to_lowercase() != folded => ambiguous = true,
-                        None => found = Some(t.to_string()),
-                        _ => {}
-                    }
-                }
-                true
-            }
-            _ => true,
-        }
-    };
-    let mut r = at.row;
-    let mut n = 0;
-    while r > 0 && n < 5000 {
-        r -= 1;
-        n += 1;
-        if !scan(r) {
-            break;
-        }
-    }
-    let mut r = at.row + 1;
-    n = 0;
-    while n < 5000 && scan(r) {
-        r += 1;
-        n += 1;
-    }
-    if ambiguous { None } else { found }
-}
-
-/// The part of `full` after the `typed` prefix, counted in characters: case folding can change
-/// a character's byte length ("ß" is two bytes, "ẞ" three).
-pub fn completion_rest<'a>(full: &'a str, typed: &str) -> Option<&'a str> {
-    let start = full.char_indices().nth(typed.chars().count())?.0;
-    full.get(start..)
-}
+pub use entry::{column_completion, completion_rest};
 
 #[cfg(test)]
 mod tests {
