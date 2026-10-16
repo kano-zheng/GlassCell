@@ -27,9 +27,25 @@ targets:
     dependencies:
       - package: GridCraft
         product: GridCraftUI
+      - target: GridCraftQuickLook
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.gridcraft.mac
         PRODUCT_NAME: GridCraft
         INFOPLIST_FILE: GridCraft/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
+  GridCraftQuickLook:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: GridCraft/Sources/QuickLook
+    dependencies:
+      - package: GridCraft
+        product: GridCraftUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.gridcraft.mac.quicklook
+        PRODUCT_NAME: GridCraftQuickLook
+        INFOPLIST_FILE: GridCraft/Resources/QuickLook/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: GridCraft/Resources/QuickLook/QuickLook.entitlements
