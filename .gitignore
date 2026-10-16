@@ -8,3 +8,8 @@ plan/
 /.claude/
 /target-*/
 /craft-fonts/
+# Built by macos/build-engine.sh
+/macos/GridCraftEngine/GridCraftFFI.xcframework/
+/macos/GridCraftEngine/Sources/GridCraftEngine/Generated.swift
+/macos/**/.build/
+/macos/**/.swiftpm/
