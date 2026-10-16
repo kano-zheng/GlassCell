@@ -216,6 +216,8 @@ pub struct Geo {
     ci: std::sync::Arc<LineIndex>,
     /// Page Layout view: cells sit on pages (`scroll` is then in page-layout units).
     pub paper: Option<Arc<gridcraft_engine::paper::PageGrid>>,
+    /// Normal view: the engine's geometry of the cells area.
+    normal: gridcraft_engine::geometry::Geometry,
 }
 
 impl Geo {
@@ -243,6 +245,8 @@ impl Geo {
             band_w = band_w.max(crate::outline::lane(zoom) + 3.0);
         }
         let cells = Rect::from_min_max(pos2(rect.left() + band_w + header_w, rect.top() + band_h + header_h), rect.max);
+        let normal =
+            gridcraft_engine::geometry::Geometry::new(sh, (cells.left(), cells.top()), (cells.width(), cells.height()), (scroll.x, scroll.y), z);
         Geo {
             rect,
             cells,
@@ -262,6 +266,7 @@ impl Geo {
             ri,
             ci,
             paper: None,
+            normal,
         }
     }
     /// Left edge of the row headers (right of the outline band).
@@ -327,21 +332,13 @@ impl Geo {
         if let Some(pg) = &self.paper {
             return self.cells.left() + (pg.col_x(col) - self.scroll.x as f64) as f32 * self.z;
         }
-        if col < self.fc {
-            self.cells.left() + self.ci.start(col) as f32 * self.z
-        } else {
-            self.cells.left() + self.frozen_w + (self.ci.start(col) as f32 - self.ci.start(self.fc) as f32 - self.scroll.x) * self.z
-        }
+        self.normal.x(col)
     }
     pub fn y(&self, _sh: &Sheet, row: u32) -> f32 {
         if let Some(pg) = &self.paper {
             return self.cells.top() + (pg.row_y(row) - self.scroll.y as f64) as f32 * self.z;
         }
-        if row < self.fr {
-            self.cells.top() + self.ri.start(row) as f32 * self.z
-        } else {
-            self.cells.top() + self.frozen_h + (self.ri.start(row) as f32 - self.ri.start(self.fr) as f32 - self.scroll.y) * self.z
-        }
+        self.normal.y(row)
     }
     pub fn cell_rect(&self, sh: &Sheet, c: CellRef) -> Rect {
         Rect::from_min_max(
@@ -358,44 +355,31 @@ impl Geo {
         if let Some(pg) = &self.paper {
             return pg.col_at(self.scroll.x as f64 + ((x - self.cells.left()) / self.z) as f64);
         }
-        let dx = (x - self.cells.left()) / self.z;
-        if dx < self.frozen_w / self.z {
-            self.ci.at(dx.max(0.0) as f64)
-        } else {
-            self.ci.at(self.ci.start(self.fc) + self.scroll.x as f64 + (dx - self.frozen_w / self.z) as f64)
-        }
+        self.normal.col_at(x)
     }
     pub fn row_at(&self, _sh: &Sheet, y: f32) -> u32 {
         if let Some(pg) = &self.paper {
             return pg.row_at(self.scroll.y as f64 + ((y - self.cells.top()) / self.z) as f64);
         }
-        let dy = (y - self.cells.top()) / self.z;
-        if dy < self.frozen_h / self.z {
-            self.ri.at(dy.max(0.0) as f64)
-        } else {
-            self.ri.at(self.ri.start(self.fr) + self.scroll.y as f64 + (dy - self.frozen_h / self.z) as f64)
-        }
+        self.normal.row_at(y)
     }
     pub fn cell_at(&self, sh: &Sheet, p: Pos2) -> CellRef {
         CellRef::new(self.row_at(sh, p.y), self.col_at(sh, p.x))
     }
     /// Visible scrolled rows (from the first visible row after the frozen ones).
     fn scroll_rows(&self, _sh: &Sheet) -> (u32, u32) {
-        let top = self.ri.start(self.fr) + self.scroll.y as f64;
-        let r0 = self.ri.at(top).max(self.fr);
-        let r1 = self.ri.at(top + ((self.cells.height() - self.frozen_h) / self.z) as f64).min(MAX_ROWS - 1);
-        (r0, r1)
+        self.normal.scroll_rows()
     }
     fn scroll_cols(&self, _sh: &Sheet) -> (u32, u32) {
-        let left = self.ci.start(self.fc) + self.scroll.x as f64;
-        let c0 = self.ci.at(left).max(self.fc);
-        let c1 = self.ci.at(left + ((self.cells.width() - self.frozen_w) / self.z) as f64).min(MAX_COLS - 1);
-        (c0, c1)
+        self.normal.scroll_cols()
     }
     /// Screen areas of the panes (frozen rows/columns or the scrolling part) that hold part of `r`.
     /// The panes share one coordinate system, so a range that is not clipped to these is also drawn
     /// over the frozen rows/columns when it is scrolled under them.
     pub fn range_panes(&self, r: RangeRef) -> Vec<Rect> {
+        if self.paper.is_none() {
+            return self.normal.range_panes(r).into_iter().map(|p| Rect::from_min_size(pos2(p.x, p.y), vec2(p.w, p.h))).collect();
+        }
         let split = pos2(self.cells.left() + self.frozen_w, self.cells.top() + self.frozen_h);
         let mut xs = Vec::new();
         if r.start.col < self.fc {

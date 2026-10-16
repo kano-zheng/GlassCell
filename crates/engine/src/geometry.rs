@@ -1,0 +1,426 @@
+//! Grid geometry for a frontend in Normal view: where rows and columns are on screen for a
+//! scroll position and zoom, the frozen panes, scrolling a cell into view, and hit-testing
+//! (cells, row and column edges, the fill handle, the selection's border, filter buttons and
+//! floating objects).
+//!
+//! Screen units are sheet units × [`Geometry::scale`], measured from [`Geometry::origin`], the
+//! top-left corner of the cells area (below the column headers, right of the row headers). The
+//! scroll offset is in sheet units past the frozen rows and columns. A right-to-left sheet is
+//! laid out left to right here and mirrored by the frontend.
+
+use std::sync::Arc;
+
+use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef};
+use gridcraft_model::{Anchor, LineIndex, Sheet};
+use serde::Serialize;
+
+use crate::Selection;
+
+/// How close (screen units) to a column header's right edge the pointer resizes the column.
+pub const COL_EDGE_SLOP: f32 = 4.0;
+/// How close to a row header's bottom edge the pointer resizes the row.
+pub const ROW_EDGE_SLOP: f32 = 3.0;
+/// Side of the fill handle at the selection's bottom-right corner.
+pub const FILL_HANDLE: f32 = 9.0;
+/// How far either side of the selection's outline the pointer grabs it to move the cells.
+pub const BORDER_SLOP: f32 = 3.0;
+/// How close to a selected object's bottom-right corner the pointer resizes it.
+pub const OBJECT_RESIZE_RADIUS: f32 = 10.0;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Rect {
+    pub fn from_min_max(x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
+        Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+    }
+    pub fn right(&self) -> f32 {
+        self.x + self.w
+    }
+    pub fn bottom(&self) -> f32 {
+        self.y + self.h
+    }
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x <= self.right() && y >= self.y && y <= self.bottom()
+    }
+    pub fn expand(&self, d: f32) -> Rect {
+        Rect { x: self.x - d, y: self.y - d, w: self.w + 2.0 * d, h: self.h + 2.0 * d }
+    }
+}
+
+/// One of up to four panes (frozen rows and columns, the scrolling part): its rows and columns
+/// (first, last) and where it is on screen.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Pane {
+    pub rows: (u32, u32),
+    pub cols: (u32, u32),
+    pub rect: Rect,
+}
+
+/// What a point over the cells area is on, in the order a click picks it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Hit {
+    /// A floating object (`chart`, `image`, `slicer`, `shape`), topmost first.
+    Object {
+        object: String,
+        id: u32,
+        rect: Rect,
+    },
+    /// The fill handle of the current selection area.
+    FillHandle,
+    /// The current selection area's outline (drag to move the cells).
+    SelectionBorder,
+    /// A filter dropdown in a header cell.
+    FilterButton {
+        cell: CellRef,
+    },
+    Cell {
+        cell: CellRef,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct Geometry {
+    /// Top-left of the cells area on screen.
+    pub origin: (f32, f32),
+    /// Size of the cells area.
+    pub size: (f32, f32),
+    /// Screen units per sheet unit.
+    pub scale: f32,
+    /// Sheet units scrolled past the frozen panes.
+    pub scroll: (f32, f32),
+    /// Frozen rows and columns (counts).
+    pub frozen: (u32, u32),
+    /// Screen size of the frozen columns and rows.
+    pub frozen_w: f32,
+    pub frozen_h: f32,
+    rows: Arc<LineIndex>,
+    cols: Arc<LineIndex>,
+}
+
+impl Geometry {
+    /// Geometry of `sh` scrolled to `scroll`, with its cells area at `origin` and `size` big, at
+    /// `scale` screen units per sheet unit.
+    pub fn new(sh: &Sheet, origin: (f32, f32), size: (f32, f32), scroll: (f32, f32), scale: f32) -> Geometry {
+        let scale = if scale.is_finite() { scale.clamp(0.01, 64.0) } else { 1.0 };
+        let finite = |v: f32| if v.is_finite() { v.max(0.0) } else { 0.0 };
+        let rows = Arc::new(LineIndex::new(&sh.rows, sh.default_row_height, MAX_ROWS));
+        let cols = Arc::new(LineIndex::new(&sh.cols, sh.default_col_width, MAX_COLS));
+        let (fr, fc) = sh.freeze.unwrap_or((0, 0));
+        let (fr, fc) = (fr.min(MAX_ROWS - 1), fc.min(MAX_COLS - 1));
+        Geometry {
+            origin,
+            size: (finite(size.0), finite(size.1)),
+            scale,
+            scroll: (finite(scroll.0), finite(scroll.1)),
+            frozen: (fr, fc),
+            frozen_w: (cols.start(fc) as f32) * scale,
+            frozen_h: (rows.start(fr) as f32) * scale,
+            rows,
+            cols,
+        }
+    }
+
+    /// The cells area.
+    pub fn cells(&self) -> Rect {
+        Rect { x: self.origin.0, y: self.origin.1, w: self.size.0, h: self.size.1 }
+    }
+
+    /// Left edge of column `col`.
+    pub fn x(&self, col: u32) -> f32 {
+        let (left, z, fc) = (self.origin.0, self.scale, self.frozen.1);
+        if col < fc {
+            left + self.cols.start(col) as f32 * z
+        } else {
+            left + self.frozen_w + (self.cols.start(col) as f32 - self.cols.start(fc) as f32 - self.scroll.0) * z
+        }
+    }
+
+    /// Top edge of row `row`.
+    pub fn y(&self, row: u32) -> f32 {
+        let (top, z, fr) = (self.origin.1, self.scale, self.frozen.0);
+        if row < fr {
+            top + self.rows.start(row) as f32 * z
+        } else {
+            top + self.frozen_h + (self.rows.start(row) as f32 - self.rows.start(fr) as f32 - self.scroll.1) * z
+        }
+    }
+
+    pub fn col_at(&self, x: f32) -> u32 {
+        let dx = (x - self.origin.0) / self.scale;
+        if dx < self.frozen_w / self.scale {
+            self.cols.at(dx.max(0.0) as f64)
+        } else {
+            self.cols.at(self.cols.start(self.frozen.1) + self.scroll.0 as f64 + (dx - self.frozen_w / self.scale) as f64)
+        }
+    }
+
+    pub fn row_at(&self, y: f32) -> u32 {
+        let dy = (y - self.origin.1) / self.scale;
+        if dy < self.frozen_h / self.scale {
+            self.rows.at(dy.max(0.0) as f64)
+        } else {
+            self.rows.at(self.rows.start(self.frozen.0) + self.scroll.1 as f64 + (dy - self.frozen_h / self.scale) as f64)
+        }
+    }
+
+    pub fn cell_at(&self, x: f32, y: f32) -> CellRef {
+        CellRef::new(self.row_at(y), self.col_at(x))
+    }
+
+    pub fn cell_rect(&self, sh: &Sheet, c: CellRef) -> Rect {
+        let (x, y) = (self.x(c.col), self.y(c.row));
+        Rect::from_min_max(x, y, x + sh.col_width(c.col) * self.scale, y + sh.row_height(c.row) * self.scale)
+    }
+
+    pub fn range_rect(&self, sh: &Sheet, r: RangeRef) -> Rect {
+        let (a, b) = (self.cell_rect(sh, r.start), self.cell_rect(sh, r.end));
+        Rect::from_min_max(a.x, a.y, b.right(), b.bottom())
+    }
+
+    /// Rows (first, last) visible in the scrolling area, after the frozen ones.
+    pub fn scroll_rows(&self) -> (u32, u32) {
+        let top = self.rows.start(self.frozen.0) + self.scroll.1 as f64;
+        let r0 = self.rows.at(top).max(self.frozen.0);
+        let r1 = self.rows.at(top + ((self.size.1 - self.frozen_h) / self.scale) as f64).min(MAX_ROWS - 1);
+        (r0, r1)
+    }
+
+    /// Columns (first, last) visible in the scrolling area, after the frozen ones.
+    pub fn scroll_cols(&self) -> (u32, u32) {
+        let left = self.cols.start(self.frozen.1) + self.scroll.0 as f64;
+        let c0 = self.cols.at(left).max(self.frozen.1);
+        let c1 = self.cols.at(left + ((self.size.0 - self.frozen_w) / self.scale) as f64).min(MAX_COLS - 1);
+        (c0, c1)
+    }
+
+    fn split(&self) -> (f32, f32) {
+        (self.origin.0 + self.frozen_w, self.origin.1 + self.frozen_h)
+    }
+
+    /// The panes to paint, scrolling one first: each pane's rows, columns and clip.
+    pub fn panes(&self) -> Vec<Pane> {
+        let cells = self.cells();
+        let (sx, sy) = self.split();
+        let (rows, cols) = (self.scroll_rows(), self.scroll_cols());
+        let frozen_rows = (0, self.frozen.0.saturating_sub(1));
+        let frozen_cols = (0, self.frozen.1.saturating_sub(1));
+        let mut out = vec![Pane { rows, cols, rect: Rect::from_min_max(sx, sy, cells.right(), cells.bottom()) }];
+        if self.frozen.0 > 0 {
+            out.push(Pane { rows: frozen_rows, cols, rect: Rect::from_min_max(sx, cells.y, cells.right(), sy) });
+        }
+        if self.frozen.1 > 0 {
+            out.push(Pane { rows, cols: frozen_cols, rect: Rect::from_min_max(cells.x, sy, sx, cells.bottom()) });
+        }
+        if self.frozen.0 > 0 && self.frozen.1 > 0 {
+            out.push(Pane { rows: frozen_rows, cols: frozen_cols, rect: Rect::from_min_max(cells.x, cells.y, sx, sy) });
+        }
+        out.retain(|p| p.rows.0 <= p.rows.1 && p.cols.0 <= p.cols.1);
+        out
+    }
+
+    /// Screen areas of the panes that hold part of `r`. The panes share one coordinate system, so
+    /// a range not clipped to these is also drawn over the frozen panes when scrolled under them.
+    pub fn range_panes(&self, r: RangeRef) -> Vec<Rect> {
+        let cells = self.cells();
+        let (sx, sy) = self.split();
+        let mut xs = Vec::new();
+        if r.start.col < self.frozen.1 {
+            xs.push((cells.x, sx));
+        }
+        if r.end.col >= self.frozen.1 {
+            xs.push((sx, cells.right()));
+        }
+        let mut ys = Vec::new();
+        if r.start.row < self.frozen.0 {
+            ys.push((cells.y, sy));
+        }
+        if r.end.row >= self.frozen.0 {
+            ys.push((sy, cells.bottom()));
+        }
+        ys.iter().flat_map(|&(y0, y1)| xs.iter().map(move |&(x0, x1)| Rect::from_min_max(x0, y0, x1, y1))).collect()
+    }
+
+    /// The scroll offset that brings `target` into view (unchanged when it is, or when it is in
+    /// the frozen rows or columns).
+    pub fn reveal(&self, sh: &Sheet, target: CellRef) -> (f32, f32) {
+        let cr = self.cell_rect(sh, target);
+        let cells = self.cells();
+        let (left, top) = self.split();
+        let (right, bottom) = (cells.right(), cells.bottom());
+        let z = self.scale;
+        let (mut sx, mut sy) = self.scroll;
+        if target.row >= self.frozen.0 {
+            if cr.y < top {
+                sy -= (top - cr.y) / z;
+            } else if cr.bottom() > bottom - 2.0 {
+                sy += (cr.bottom() - bottom + 2.0) / z;
+            }
+        }
+        if target.col >= self.frozen.1 {
+            if cr.x < left {
+                sx -= (left - cr.x) / z;
+            } else if cr.right() > right - 2.0 {
+                // A column wider than the view keeps its left edge in view.
+                sx += ((cr.right() - right + 2.0) / z).min(cr.x - left);
+            }
+        }
+        (sx.max(0.0), sy.max(0.0))
+    }
+
+    /// The column whose right edge is within [`COL_EDGE_SLOP`] of `x` (in the column headers),
+    /// and that edge.
+    pub fn col_edge(&self, sh: &Sheet, x: f32) -> Option<(u32, f32)> {
+        let c = self.col_at(x);
+        [c, c.saturating_sub(1)].into_iter().map(|cc| (cc, self.x(cc) + sh.col_width(cc) * self.scale)).find(|(_, e)| (x - e).abs() <= COL_EDGE_SLOP)
+    }
+
+    /// The row whose bottom edge is within [`ROW_EDGE_SLOP`] of `y` (in the row headers), and that edge.
+    pub fn row_edge(&self, sh: &Sheet, y: f32) -> Option<(u32, f32)> {
+        let r = self.row_at(y);
+        [r, r.saturating_sub(1)].into_iter().map(|rr| (rr, self.y(rr) + sh.row_height(rr) * self.scale)).find(|(_, e)| (y - e).abs() <= ROW_EDGE_SLOP)
+    }
+
+    /// Where a floating object anchored at `a` is.
+    pub fn anchor_rect(&self, a: &Anchor) -> Rect {
+        let (x, y) = (self.x(a.cell.col) + a.dx * self.scale, self.y(a.cell.row) + a.dy * self.scale);
+        Rect { x, y, w: a.width * self.scale, h: a.height.max(1.0) * self.scale }
+    }
+
+    /// The topmost floating object at a point: slicers, then charts, pictures and shapes (later
+    /// ones are drawn over earlier ones). Charts and shapes are easier to grab by their edge.
+    pub fn object_at(&self, sh: &Sheet, x: f32, y: f32) -> Option<(&'static str, u32, Rect)> {
+        if !self.cells().contains(x, y) {
+            return None;
+        }
+        let find = |kind: &'static str, grab: f32, objects: Vec<(u32, &Anchor)>| {
+            objects.into_iter().rev().map(|(id, a)| (kind, id, self.anchor_rect(a))).find(|(_, _, r)| r.expand(grab).contains(x, y))
+        };
+        find("slicer", 0.0, sh.slicers.iter().map(|o| (o.id, &o.anchor)).collect())
+            .or_else(|| find("chart", 4.0, sh.charts.iter().map(|o| (o.id, &o.anchor)).collect()))
+            .or_else(|| find("image", 0.0, sh.images.iter().map(|o| (o.id, &o.anchor)).collect()))
+            .or_else(|| find("shape", 3.0, sh.shapes.iter().map(|o| (o.id, &o.anchor)).collect()))
+    }
+
+    /// The fill handle of the selection's current area. It only reacts in the panes where it is
+    /// painted, not over frozen panes a scrolled selection lies under.
+    pub fn fill_handle(&self, sh: &Sheet, sel: &Selection) -> Rect {
+        let r = self.range_rect(sh, sel.current());
+        Rect { x: r.right() - FILL_HANDLE / 2.0, y: r.bottom() - FILL_HANDLE / 2.0, w: FILL_HANDLE, h: FILL_HANDLE }
+    }
+
+    /// The filter dropdown in header cell `c` (empty without one): within the room AutoFit
+    /// leaves for it, at the cell's bottom-right.
+    pub fn filter_button(&self, sh: &Sheet, c: CellRef) -> Rect {
+        let rect = self.cell_rect(sh, c);
+        let pad = 2.0 * self.scale;
+        let s = (rect.h - 4.0).clamp(10.0, 18.0).min((sh.filter_button_space(c) * self.scale - pad).max(0.0));
+        Rect { x: rect.right() - s - pad, y: rect.bottom() - s - pad, w: s, h: s }
+    }
+
+    /// What a click at `(x, y)` in the cells area is on.
+    pub fn hit(&self, sh: &Sheet, sel: &Selection, x: f32, y: f32) -> Hit {
+        if let Some((object, id, rect)) = self.object_at(sh, x, y) {
+            return Hit::Object { object: object.to_string(), id, rect };
+        }
+        let in_panes = |r: RangeRef| self.range_panes(r).iter().any(|p| p.contains(x, y));
+        let cur = sel.current();
+        if self.fill_handle(sh, sel).contains(x, y) && in_panes(RangeRef::cell(cur.end)) {
+            return Hit::FillHandle;
+        }
+        let outline = self.range_rect(sh, cur);
+        let shrunk = outline.expand(-BORDER_SLOP);
+        let on_border = outline.expand(BORDER_SLOP).contains(x, y) && !(shrunk.w > 0.0 && shrunk.h > 0.0 && shrunk.contains(x, y));
+        if on_border && in_panes(cur) {
+            return Hit::SelectionBorder;
+        }
+        let cell = self.cell_at(x, y);
+        if sh.has_filter_button(cell) && self.filter_button(sh, cell).contains(x, y) {
+            return Hit::FilterButton { cell };
+        }
+        Hit::Cell { cell }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gridcraft_model::LineInfo;
+
+    use super::*;
+
+    fn sheet() -> Sheet {
+        let mut sh = Sheet::new("S");
+        sh.cols.insert(1, LineInfo { size: Some(100.0), ..LineInfo::default() });
+        sh.rows.insert(2, LineInfo { hidden: true, ..LineInfo::default() });
+        sh
+    }
+
+    #[test]
+    fn columns_and_rows_map_both_ways_with_frozen_panes_and_scrolling() {
+        let mut sh = sheet();
+        sh.freeze = Some((1, 1));
+        let g = Geometry::new(&sh, (10.0, 20.0), (800.0, 600.0), (100.0, 0.0), 1.0);
+        let w = sh.default_col_width;
+        assert_eq!(g.x(0), 10.0);
+        assert_eq!(g.frozen_w, w);
+        // Column B (100 wide) is scrolled out of view: C starts right after the frozen A.
+        assert_eq!(g.x(2), 10.0 + w);
+        assert_eq!(g.col_at(10.0 + w + 1.0), 2);
+        assert_eq!(g.col_at(15.0), 0);
+        // The hidden row 3 takes no room.
+        assert_eq!(g.y(3), g.y(2));
+        assert_eq!(g.row_at(g.y(3) + 1.0), 3);
+        assert_eq!(g.panes().len(), 4);
+        assert_eq!(g.scroll_cols().0, 2);
+    }
+
+    #[test]
+    fn reveal_scrolls_just_enough() {
+        let sh = sheet();
+        let g = Geometry::new(&sh, (0.0, 0.0), (500.0, 300.0), (0.0, 0.0), 1.0);
+        let (sx, sy) = g.reveal(&sh, CellRef::new(100, 0));
+        assert_eq!(sx, 0.0);
+        let g = Geometry::new(&sh, (0.0, 0.0), (500.0, 300.0), (sx, sy), 1.0);
+        let r = g.cell_rect(&sh, CellRef::new(100, 0));
+        assert!(r.bottom() <= 300.0 && r.bottom() > 290.0, "{r:?}");
+        assert_eq!(g.reveal(&sh, CellRef::new(100, 0)), (sx, sy), "already in view");
+        assert_eq!(g.reveal(&sh, CellRef::new(0, 0)).1, 0.0);
+    }
+
+    #[test]
+    fn hit_testing_finds_objects_the_fill_handle_the_border_and_cells() {
+        let mut s = crate::Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", serde_json::json!({"range": "A1", "values": [[1], [2], [3]]})).unwrap();
+        let id =
+            s.execute("insert.chart", serde_json::json!({"range": "A1:A3", "at": "D11", "type": "bar"})).unwrap()["chart"].as_u64().unwrap() as u32;
+        let sh = s.doc().unwrap().wb.active().unwrap().clone();
+        let g = Geometry::new(&sh, (0.0, 0.0), (1000.0, 800.0), (0.0, 0.0), 1.0);
+        let mut sel = Selection::at(CellRef::new(0, 0));
+        sel.ranges = vec![RangeRef::new(CellRef::new(0, 0), CellRef::new(1, 1))];
+        let out = g.range_rect(&sh, sel.current());
+        assert_eq!(g.hit(&sh, &sel, out.right(), out.bottom()), Hit::FillHandle);
+        assert_eq!(g.hit(&sh, &sel, out.x + 20.0, out.y + 1.0), Hit::SelectionBorder);
+        assert_eq!(g.hit(&sh, &sel, out.x + 20.0, out.y + 10.0), Hit::Cell { cell: CellRef::new(0, 0) });
+        let chart = g.anchor_rect(&sh.charts[0].anchor);
+        assert_eq!(g.hit(&sh, &sel, chart.x + 5.0, chart.y + 5.0), Hit::Object { object: "chart".into(), id, rect: chart });
+        assert_eq!(g.col_edge(&sh, g.x(2) + 2.0).map(|e| e.0), Some(1));
+        assert_eq!(g.col_edge(&sh, g.x(2) + 30.0), None);
+    }
+
+    #[test]
+    fn hostile_input_stays_in_range() {
+        let sh = sheet();
+        let g = Geometry::new(&sh, (0.0, 0.0), (f32::NAN, f32::INFINITY), (f32::NAN, -5.0), f32::NAN);
+        assert!(g.col_at(f32::MAX) < MAX_COLS);
+        assert!(g.row_at(f32::MIN) < MAX_ROWS);
+        let _ = g.panes();
+        let _ = g.reveal(&sh, CellRef::new(MAX_ROWS - 1, MAX_COLS - 1));
+    }
+}
