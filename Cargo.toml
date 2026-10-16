@@ -27,6 +27,7 @@ gridcraft-pdf = { path = "crates/pdf" }
 
 # foundation
 thiserror = "2"
+uniffi = "0.32"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"

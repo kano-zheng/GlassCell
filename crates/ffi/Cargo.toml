@@ -1,0 +1,36 @@
+[package]
+name = "gridcraft-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GridCraft engine for Swift: a UniFFI bridge (commands, UI requests, read models)"
+
+[lib]
+name = "gridcraft_ffi"
+crate-type = ["lib", "staticlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+# The binding generator (`cargo run -p gridcraft-ffi --features bindgen --bin uniffi-bindgen`).
+bindgen = ["uniffi/cli"]
+
+# The only crate that doesn't forbid `unsafe`: the FFI scaffolding UniFFI generates needs it.
+# Handwritten code stays safe (`#![deny(unsafe_code)]` in lib.rs covers it).
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[dependencies]
+gridcraft-engine = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uniffi = { workspace = true }
