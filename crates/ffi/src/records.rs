@@ -763,6 +763,15 @@ impl From<gridcraft_engine::host_clipboard::Paste> for PasteSource {
 
 // ------------------------------------------------------------------ geometry
 
+/// A printed page in Page Layout view: the paper, where its cells go, and whether it holds
+/// printed data (else it is a faded "add data" page).
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
+pub struct PageRect {
+    pub paper: GridRect,
+    pub content: GridRect,
+    pub data: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
 pub struct GridPane {
     pub rows: LineSpan,

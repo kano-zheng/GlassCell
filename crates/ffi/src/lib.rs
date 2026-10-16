@@ -300,8 +300,14 @@ impl Engine {
         guard(|| {
             let s = self.session();
             let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
-            let sheet = d.wb.sheets.get(d.wb.active_sheet).cloned().ok_or_else(|| engine_error("no sheet"))?;
-            let geo = gridcraft_engine::geometry::Geometry::new(&sheet, (origin.x, origin.y), (size.width, size.height), (scroll.x, scroll.y), scale);
+            let si = d.wb.active_sheet;
+            let sheet = d.wb.sheets.get(si).cloned().ok_or_else(|| engine_error("no sheet"))?;
+            let (origin, size, scroll) = ((origin.x, origin.y), (size.width, size.height), (scroll.x, scroll.y));
+            // Page Layout view lays the cells out on printed pages.
+            let paged = (sheet.view == model::SheetViewMode::PageLayout)
+                .then(|| gridcraft_engine::geometry::Geometry::paged(&d.wb, si, origin, size, scroll, scale))
+                .flatten();
+            let geo = paged.unwrap_or_else(|| gridcraft_engine::geometry::Geometry::new(&sheet, origin, size, scroll, scale));
             Ok(Arc::new(GridGeometry { sheet, selection: d.selection.clone(), geo }))
         })
     }
@@ -438,6 +444,14 @@ impl GridGeometry {
 
 #[uniffi::export]
 impl GridGeometry {
+    /// Screen units per sheet unit (in Page Layout view, times the print scale).
+    pub fn scale(&self) -> f32 {
+        self.geo.scale
+    }
+    /// Page Layout view: the visible pages (none in Normal view).
+    pub fn pages(&self) -> Vec<PageRect> {
+        self.geo.pages().into_iter().map(|p| PageRect { paper: p.paper.into(), content: p.content.into(), data: p.data }).collect()
+    }
     /// Frozen rows and columns.
     pub fn frozen(&self) -> CellAddress {
         CellAddress { row: self.geo.frozen.0, col: self.geo.frozen.1 }

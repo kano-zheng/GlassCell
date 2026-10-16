@@ -143,3 +143,15 @@ fn fill_and_resize_rules_come_through() {
     assert_eq!(e.resize_columns(3).unwrap(), "D:D");
     assert!(resize_label(true, 64.0).starts_with("Width: 8.43"));
 }
+
+#[test]
+fn page_layout_geometry_has_pages() {
+    let e = engine();
+    e.execute("view.pageLayout".into(), String::new()).unwrap();
+    let g = e.geometry(GridPoint { x: 0.0, y: 0.0 }, GridSize { width: 1200.0, height: 900.0 }, GridPoint { x: 0.0, y: 0.0 }, 0.8).unwrap();
+    assert!(!g.pages().is_empty());
+    assert!(g.scale() > 0.0);
+    e.execute("view.normal".into(), String::new()).unwrap();
+    let g = e.geometry(GridPoint { x: 0.0, y: 0.0 }, GridSize { width: 1200.0, height: 900.0 }, GridPoint { x: 0.0, y: 0.0 }, 0.8).unwrap();
+    assert!(g.pages().is_empty());
+}

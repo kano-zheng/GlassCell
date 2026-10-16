@@ -54,7 +54,8 @@ public struct GridRenderer {
                 geometry = try engine.geometry(origin: point(headerWidth, headerHeight), size: gridSize(size, headerWidth, headerHeight), scroll: point(scroll.x, scroll.y), scale: scale)
             }
         }
-        return Layout(headerWidth: headerWidth, headerHeight: headerHeight, scale: scale, geometry: geometry)
+        // In Page Layout view cells are drawn at the print scale too.
+        return Layout(headerWidth: headerWidth, headerHeight: headerHeight, scale: geometry.scale(), geometry: geometry)
     }
 
     /// Draws the grid; returns the layout it used (for hit-testing).
@@ -66,6 +67,8 @@ public struct GridRenderer {
         let selection = try engine.selection()
         ctx.setFillColor(Palette.sheet)
         ctx.fill(CGRect(origin: .zero, size: size))
+        drawPages(ctx, geometry.pages(), cells: CGRect(x: layout.headerWidth, y: layout.headerHeight, width: max(0, size.width - layout.headerWidth),
+                                                        height: max(0, size.height - layout.headerHeight)))
         for pane in geometry.panes() {
             ctx.saveGState()
             ctx.clip(to: cgRect(pane.rect))
@@ -85,6 +88,27 @@ public struct GridRenderer {
             drawHeaders(ctx, layout: layout, size: size, selection: selection)
         }
         return layout
+    }
+
+    // MARK: - Pages
+
+    /// Page Layout view: the desk, and each page as paper with a soft shadow; pages without
+    /// printed data are faded.
+    private func drawPages(_ ctx: CGContext, _ pages: [PageRect], cells: CGRect) {
+        guard !pages.isEmpty else { return }
+        ctx.saveGState()
+        ctx.clip(to: cells)
+        ctx.setFillColor(Palette.desk)
+        ctx.fill(cells)
+        for page in pages {
+            let paper = cgRect(page.paper)
+            ctx.saveGState()
+            ctx.setShadow(offset: CGSize(width: 0, height: 1.5), blur: 4, color: CGColor(gray: 0, alpha: 0.25))
+            ctx.setFillColor(page.data ? Palette.sheet : CGColor(gray: 0.985, alpha: 1))
+            ctx.fill(paper)
+            ctx.restoreGState()
+        }
+        ctx.restoreGState()
     }
 
     // MARK: - Gridlines
@@ -499,12 +523,14 @@ public struct GridRenderer {
         ctx.setStrokeColor(Palette.headerLine)
         ctx.setLineWidth(1)
         for col in Set(cols).sorted() {
-            let x0 = CGFloat(geometry.x(col: col)), x1 = CGFloat(geometry.x(col: col &+ 1))
+            // The column's own width: in Page Layout view the next column may be on the next page.
+            let cell = cgRect(geometry.cellRect(cell: CellAddress(row: 0, col: col)))
+            let x0 = cell.minX, x1 = cell.maxX
             guard x1 > x0, x1 > hw, x0 < size.width else { continue }
-            let cell = CGRect(x: max(x0, hw), y: 0, width: x1 - max(x0, hw), height: hh)
+            let header = CGRect(x: max(x0, hw), y: 0, width: x1 - max(x0, hw), height: hh)
             if let current, col >= current.first.col, col <= current.last.col {
                 ctx.setFillColor(Palette.headerSelected)
-                ctx.fill(cell)
+                ctx.fill(header)
             }
             strokeLine(ctx, from: CGPoint(x: x1 - 0.5, y: 0), to: CGPoint(x: x1 - 0.5, y: hh))
             let line = makeLine(columnLabel(col: col), font: font, color: Palette.headerText)
@@ -512,13 +538,14 @@ public struct GridRenderer {
             let w = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
             if (x1 - x0) > w {
                 ctx.saveGState()
-                ctx.clip(to: cell)
+                ctx.clip(to: header)
                 draw(line, ctx, at: CGPoint(x: (x0 + x1 - w) / 2, y: (hh + a - d) / 2))
                 ctx.restoreGState()
             }
         }
         for row in Set(rows).sorted() {
-            let y0 = CGFloat(geometry.y(row: row)), y1 = CGFloat(geometry.y(row: row &+ 1))
+            let rowRect = cgRect(geometry.cellRect(cell: CellAddress(row: row, col: 0)))
+            let y0 = rowRect.minY, y1 = rowRect.maxY
             guard y1 > y0, y1 > hh, y0 < size.height else { continue }
             let cell = CGRect(x: 0, y: max(y0, hh), width: hw, height: y1 - max(y0, hh))
             if let current, row >= current.first.row, row <= current.last.row {
@@ -634,6 +661,7 @@ enum Palette {
     static let headerLine = CGColor(gray: 0.82, alpha: 1)
     static let headerText = CGColor(gray: 0.33, alpha: 1)
     static let frozenLine = CGColor(gray: 0.59, alpha: 1)
+    static let desk = CGColor(gray: 0.88, alpha: 1)
     static let secondary = CGColor(gray: 0.43, alpha: 1)
     static let note = CGColor(srgbRed: 0.82, green: 0.18, blue: 0.18, alpha: 1)
     static let threadedComment = CGColor(srgbRed: 0.53, green: 0.33, blue: 0.78, alpha: 1)

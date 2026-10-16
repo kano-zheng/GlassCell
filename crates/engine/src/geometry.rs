@@ -11,7 +11,9 @@
 use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef};
-use gridcraft_model::{Anchor, LineIndex, Sheet};
+use gridcraft_model::{Anchor, LineIndex, Sheet, Workbook};
+
+use crate::paper::PageGrid;
 use serde::Serialize;
 
 use crate::Selection;
@@ -102,6 +104,17 @@ pub struct Geometry {
     pub frozen_h: f32,
     rows: Arc<LineIndex>,
     cols: Arc<LineIndex>,
+    /// Page Layout view: cells sit on printed pages (`scroll` is then in layout units).
+    paper: Option<Arc<PageGrid>>,
+}
+
+/// One printed page in Page Layout view: the paper, where its cells go, and whether it holds
+/// printed data (else it is a faded "add data" page).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PageView {
+    pub paper: Rect,
+    pub content: Rect,
+    pub data: bool,
 }
 
 impl Geometry {
@@ -124,7 +137,48 @@ impl Geometry {
             frozen_h: (rows.start(fr) as f32) * scale,
             rows,
             cols,
+            paper: None,
         }
+    }
+
+    /// Page Layout view geometry of sheet `si`: the sheet paginated as printed, pages side by
+    /// side on a desk, scrolled by `scroll` layout units, cells at `scale` × the print scale.
+    /// No frozen panes (as in Excel). `None` when the sheet doesn't exist.
+    pub fn paged(wb: &Workbook, si: usize, origin: (f32, f32), size: (f32, f32), scroll: (f32, f32), scale: f32) -> Option<Geometry> {
+        let sh = wb.sheet(si)?;
+        let mut g = Geometry::new(sh, origin, size, scroll, scale);
+        // Layout units never run ahead of sheet units: covering the view in sheet units is enough.
+        let probe = PageGrid::build(wb, si, 0, 0)?;
+        let z = (g.scale * probe.scale.clamp(0.1, 4.0)).clamp(0.01, 64.0);
+        let (need_row, need_col) = crate::paper::need_for(sh, f64::from(g.scroll.0 + g.size.0 / z), f64::from(g.scroll.1 + g.size.1 / z));
+        let grid = PageGrid::build(wb, si, need_row, need_col)?;
+        g.scale = z;
+        g.frozen = (0, 0);
+        g.frozen_w = 0.0;
+        g.frozen_h = 0.0;
+        g.paper = Some(Arc::new(grid));
+        Some(g)
+    }
+
+    /// Page Layout view: the visible pages.
+    pub fn pages(&self) -> Vec<PageView> {
+        let Some(pg) = &self.paper else { return vec![] };
+        let z = f64::from(self.scale);
+        let (sx, sy) = (f64::from(self.scroll.0), f64::from(self.scroll.1));
+        let ((i0, i1), (j0, j1)) = pg.pages_in(sx, sy, sx + f64::from(self.size.0) / z, sy + f64::from(self.size.1) / z);
+        let screen = |(x, y, w, h): (f64, f64, f64, f64)| Rect {
+            x: self.origin.0 + ((x - sx) * z) as f32,
+            y: self.origin.1 + ((y - sy) * z) as f32,
+            w: (w * z) as f32,
+            h: (h * z) as f32,
+        };
+        let mut out = Vec::new();
+        for i in i0..=i1.min(i0 + 64) {
+            for j in j0..=j1.min(j0 + 64) {
+                out.push(PageView { paper: screen(pg.page_rect(i, j)), content: screen(pg.content_rect(i, j)), data: pg.is_data_page(i, j) });
+            }
+        }
+        out
     }
 
     /// The cells area.
@@ -134,6 +188,9 @@ impl Geometry {
 
     /// Left edge of column `col`.
     pub fn x(&self, col: u32) -> f32 {
+        if let Some(pg) = &self.paper {
+            return self.origin.0 + ((pg.col_x(col) - f64::from(self.scroll.0)) * f64::from(self.scale)) as f32;
+        }
         let (left, z, fc) = (self.origin.0, self.scale, self.frozen.1);
         if col < fc {
             left + self.cols.start(col) as f32 * z
@@ -144,6 +201,9 @@ impl Geometry {
 
     /// Top edge of row `row`.
     pub fn y(&self, row: u32) -> f32 {
+        if let Some(pg) = &self.paper {
+            return self.origin.1 + ((pg.row_y(row) - f64::from(self.scroll.1)) * f64::from(self.scale)) as f32;
+        }
         let (top, z, fr) = (self.origin.1, self.scale, self.frozen.0);
         if row < fr {
             top + self.rows.start(row) as f32 * z
@@ -153,6 +213,9 @@ impl Geometry {
     }
 
     pub fn col_at(&self, x: f32) -> u32 {
+        if let Some(pg) = &self.paper {
+            return pg.col_at(f64::from(self.scroll.0) + f64::from((x - self.origin.0) / self.scale)).min(MAX_COLS - 1);
+        }
         let dx = (x - self.origin.0) / self.scale;
         if dx < self.frozen_w / self.scale {
             self.cols.at(dx.max(0.0) as f64)
@@ -162,6 +225,9 @@ impl Geometry {
     }
 
     pub fn row_at(&self, y: f32) -> u32 {
+        if let Some(pg) = &self.paper {
+            return pg.row_at(f64::from(self.scroll.1) + f64::from((y - self.origin.1) / self.scale)).min(MAX_ROWS - 1);
+        }
         let dy = (y - self.origin.1) / self.scale;
         if dy < self.frozen_h / self.scale {
             self.rows.at(dy.max(0.0) as f64)
@@ -204,8 +270,41 @@ impl Geometry {
         (self.origin.0 + self.frozen_w, self.origin.1 + self.frozen_h)
     }
 
-    /// The panes to paint, scrolling one first: each pane's rows, columns and clip.
+    /// The panes to paint, scrolling one first: each pane's rows, columns and clip. In Page
+    /// Layout view, one per visible page (its cells, clipped to its margins).
     pub fn panes(&self) -> Vec<Pane> {
+        if let Some(pg) = &self.paper {
+            let cells = self.cells();
+            let z = f64::from(self.scale);
+            let (sx, sy) = (f64::from(self.scroll.0), f64::from(self.scroll.1));
+            let ((i0, i1), (j0, j1)) = pg.pages_in(sx, sy, sx + f64::from(self.size.0) / z, sy + f64::from(self.size.1) / z);
+            let mut out = Vec::new();
+            for i in i0..=i1.min(i0 + 64) {
+                for j in j0..=j1.min(j0 + 64) {
+                    let (Some((r0, r1)), Some((c0, c1))) = (pg.row_band(i), pg.col_band(j)) else { continue };
+                    let (x, y, w, h) = pg.content_rect(i, j);
+                    let clip = Rect {
+                        x: self.origin.0 + ((x - sx) * z) as f32,
+                        y: self.origin.1 + ((y - sy) * z) as f32,
+                        w: (w * z) as f32,
+                        h: (h * z) as f32,
+                    };
+                    let left = clip.x.max(cells.x);
+                    let top = clip.y.max(cells.y);
+                    let right = clip.right().min(cells.right());
+                    let bottom = clip.bottom().min(cells.bottom());
+                    if right <= left || bottom <= top {
+                        continue;
+                    }
+                    let rows = (self.row_at(top).max(r0), self.row_at(bottom - 0.5).min(r1));
+                    let cols = (self.col_at(left).max(c0), self.col_at(right - 0.5).min(c1));
+                    if rows.0 <= rows.1 && cols.0 <= cols.1 {
+                        out.push(Pane { rows, cols, rect: Rect::from_min_max(left, top, right, bottom) });
+                    }
+                }
+            }
+            return out;
+        }
         let cells = self.cells();
         let (sx, sy) = self.split();
         let (rows, cols) = (self.scroll_rows(), self.scroll_cols());
@@ -229,6 +328,9 @@ impl Geometry {
     /// a range not clipped to these is also drawn over the frozen panes when scrolled under them.
     pub fn range_panes(&self, r: RangeRef) -> Vec<Rect> {
         let cells = self.cells();
+        if self.paper.is_some() {
+            return vec![cells];
+        }
         let (sx, sy) = self.split();
         let mut xs = Vec::new();
         if r.start.col < self.frozen.1 {
@@ -501,6 +603,23 @@ mod tests {
         assert_eq!(resize_rows(&sel, 0), "1:1");
         assert_eq!(resize_label(true, 64.0), "Width: 8.43 (64 pixels)");
         assert_eq!(resize_label(false, f32::NAN), "Height: 0.00 (0 pixels)");
+    }
+
+    #[test]
+    fn page_layout_puts_cells_on_pages() {
+        let mut s = crate::Session::new();
+        s.execute("file.new", serde_json::json!({"sample": "sales"})).unwrap();
+        let d = s.active().unwrap();
+        let g = Geometry::paged(&d.wb, 0, (0.0, 0.0), (1200.0, 900.0), (0.0, 0.0), 1.0).unwrap();
+        let pages = g.pages();
+        assert!(!pages.is_empty());
+        assert!(pages[0].data);
+        let a1 = g.cell_rect(d.wb.sheet(0).unwrap(), CellRef::new(0, 0));
+        assert!(pages[0].content.contains(a1.x + 1.0, a1.y + 1.0), "A1 sits in the first page's margins");
+        assert_eq!(g.cell_at(a1.x + 1.0, a1.y + 1.0), CellRef::new(0, 0));
+        let panes = g.panes();
+        assert!(!panes.is_empty() && panes[0].rows.0 == 0 && panes[0].cols.0 == 0);
+        assert_eq!(g.frozen, (0, 0));
     }
 
     #[test]
