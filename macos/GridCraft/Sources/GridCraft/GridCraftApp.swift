@@ -3,6 +3,11 @@ import SwiftUI
 
 @main
 struct GridCraftApp: App {
+    init() {
+        // Agents and scripts drive the app over 127.0.0.1 when launched with `--control <port>`.
+        ControlServer.startIfRequested()
+    }
+
     var body: some Scene {
         DocumentGroup(newDocument: { SpreadsheetDocument() }) { file in
             WorkbookView(document: file.document)

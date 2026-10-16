@@ -130,6 +130,16 @@ impl Engine {
         })
     }
 
+    /// The commands run so far, replayable (passwords left out), as a JSON array of
+    /// `{command, params}`.
+    pub fn journal(&self) -> Result<String, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let list: Vec<Json> = s.journal.iter().map(|(id, p)| serde_json::json!({"command": id, "params": p})).collect();
+            Ok(Json::Array(list).to_string())
+        })
+    }
+
     /// The UI requests commands made since the last call (dialogs, messages, edit mode, URLs).
     pub fn take_ui_requests(&self) -> Result<Vec<UiRequest>, FfiError> {
         guard(|| Ok(self.session().take_ui_requests().into_iter().map(UiRequest::from).collect()))
@@ -412,6 +422,12 @@ pub fn column_label(col: u32) -> String {
 #[uniffi::export]
 pub fn cell_name(cell: CellAddress) -> String {
     CellRef::new(row_of(cell.row), col_of(cell.col)).a1()
+}
+
+/// The cell an A1 reference names (`B3`, `$B$3`); `None` for anything else.
+#[uniffi::export]
+pub fn parse_cell(text: String) -> Option<CellAddress> {
+    CellRef::parse(text.trim()).map(CellAddress::from)
 }
 
 /// A range's A1 reference (`B3:D7`, or `B3` for one cell), for command parameters.

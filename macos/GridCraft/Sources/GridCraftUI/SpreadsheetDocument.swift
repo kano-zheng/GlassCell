@@ -28,6 +28,10 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
     @Published public var showPalette = false
     /// The inspector is shown.
     @Published public var showInspector = false
+    /// The form dialog shown as a sheet, if any.
+    @Published var form: PresentedForm?
+    /// The Mac's own dialog shown as a sheet, if any.
+    @Published var dialog: DialogRequest?
 
     /// A new workbook: empty, or one of the engine's samples (`sales`, `budget`, `grades`).
     public init(sample: String? = nil) {

@@ -20,6 +20,12 @@ public final class WorkbookRegistry {
         entries.append(Entry(document: document, editor: editor))
     }
 
+    /// `window` came to the front by other means than a click (the control channel opened it).
+    public func activated(window: NSWindow?) {
+        guard let grid = window?.contentView?.firstDescendant(of: GridNSView.self), let document = grid.document, let editor = grid.editor else { return }
+        activated(document, editor: editor)
+    }
+
     /// The frontmost workbook, if any window is open.
     public var frontmost: SpreadsheetDocument? {
         entries.removeAll { $0.document == nil }
@@ -29,6 +35,17 @@ public final class WorkbookRegistry {
     /// The frontmost workbook's edit, to confirm before a command runs.
     public var frontmostEditor: EditController? {
         entries.last?.editor
+    }
+
+    /// Every open workbook, the frontmost last.
+    public var documents: [SpreadsheetDocument] {
+        entries.removeAll { $0.document == nil }
+        return entries.compactMap(\.document)
+    }
+
+    /// The window showing `document`, if it has one.
+    public func window(for document: SpreadsheetDocument) -> NSWindow? {
+        NSApplication.shared.windows.first { $0.contentView?.firstDescendant(of: GridNSView.self)?.document === document }
     }
 
     public var count: Int {

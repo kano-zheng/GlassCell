@@ -8,8 +8,6 @@ public struct WorkbookView: View {
     @Environment(\.undoManager) private var undoManager
     @State private var frameTime: Double = 0
     @State private var editor: EditController
-    @State private var form: PresentedForm?
-    @State private var dialog: DialogRequest?
 
     public init(document: SpreadsheetDocument) {
         self.document = document
@@ -19,36 +17,6 @@ public struct WorkbookView: View {
     private var sheet: SheetInfo? {
         _ = document.generation
         return try? document.engine.sheet()
-    }
-
-    /// What a command asked for: dialogs (the Mac's come in MAC6; Format Cells is the
-    /// inspector), messages, editing with a template, links.
-    private func handle(_ request: UiRequest) {
-        switch request {
-        case let .dialog(name, params):
-            if name == "formatCells" {
-                document.showInspector = true
-            } else if let session = try? document.engine.openForm(name: name, params: params) {
-                form = PresentedForm(session: session)
-            } else if DialogRequest.handled.contains(name) {
-                dialog = DialogRequest(name: name, params: JSON.decode(params))
-            } else if name == "commandSearch" {
-                document.showPalette = true
-            } else if name == "insertPicture" {
-                let values = JSON.decode(params)
-                Task { @MainActor in insertPicture(document, params: values) }
-            } else {
-                document.problem = "The “\(name)” dialog isn't in GridCraft for Mac yet."
-            }
-        case let .message(text):
-            document.problem = text
-        case let .editCell(text):
-            editor.grid?.beginEditing(text: text)
-        case let .openUrl(url):
-            if let link = URL(string: url) {
-                NSWorkspace.shared.open(link)
-            }
-        }
     }
 
     public var body: some View {
@@ -96,10 +64,10 @@ public struct WorkbookView: View {
             WorkbookToolbar(document: document, editor: editor, undoManager: undoManager)
         }
         .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
-        .sheet(item: $dialog) { request in
+        .sheet(item: $document.dialog) { request in
             CustomDialog(request: request, document: document, editor: editor)
         }
-        .sheet(item: $form) { presented in
+        .sheet(item: $document.form) { presented in
             FormSheet(form: presented.session, document: document)
         }
         .sheet(isPresented: $document.showPalette) {
@@ -109,7 +77,7 @@ public struct WorkbookView: View {
             guard !requests.isEmpty else { return }
             document.requests = []
             for request in requests {
-                handle(request)
+                document.handle(request, editor: editor)
             }
         }
         .onAppear {
@@ -127,6 +95,38 @@ public struct WorkbookView: View {
             Button("OK") { document.problem = nil }
         } message: {
             Text(document.problem ?? "")
+        }
+    }
+}
+
+extension SpreadsheetDocument {
+    /// What a command asked for: dialogs (Format Cells is the inspector), messages, editing
+    /// with a template, links.
+    @MainActor func handle(_ request: UiRequest, editor: EditController) {
+        switch request {
+        case let .dialog(name, params):
+            if name == "formatCells" {
+                showInspector = true
+            } else if let session = try? engine.openForm(name: name, params: params) {
+                form = PresentedForm(session: session)
+            } else if DialogRequest.handled.contains(name) {
+                dialog = DialogRequest(name: name, params: JSON.decode(params))
+            } else if name == "commandSearch" {
+                showPalette = true
+            } else if name == "insertPicture" {
+                let values = JSON.decode(params)
+                Task { @MainActor in insertPicture(self, params: values) }
+            } else {
+                problem = "The “\(name)” dialog isn't in GridCraft for Mac yet."
+            }
+        case let .message(text):
+            problem = text
+        case let .editCell(text):
+            editor.grid?.beginEditing(text: text)
+        case let .openUrl(url):
+            if let link = URL(string: url) {
+                NSWorkspace.shared.open(link)
+            }
         }
     }
 }

@@ -8,8 +8,8 @@
 mod assets;
 mod ico;
 mod keytips;
-mod mac_strings;
 mod layers;
+mod mac_strings;
 #[cfg_attr(not(feature = "engine"), allow(dead_code))]
 mod parity;
 mod stats;

@@ -43,6 +43,20 @@ this Mac's architecture only.
 `GridCraft/Resources/Localizable.xcstrings` is generated from egui's translation tables:
 `cargo xtask mac-strings` after changing them (`--check` verifies it is current).
 
+## Control channel
+
+Agents and scripts drive the app with the JSON-lines protocol of `docs/control-protocol.md`:
+
+```sh
+open -n target/mac/GridCraft.app --args --control 7979   # or GRIDCRAFT_CONTROL_PORT=7979
+printf '%s\n' '{"id":1,"method":"app.open","params":{"path":"/tmp/book.xlsx"}}' \
+  '{"id":2,"method":"cell.get","params":{"cell":"B3"}}' | nc 127.0.0.1 7979
+```
+
+It listens on 127.0.0.1 only and is off unless asked for. It acts on the frontmost workbook;
+`ui.click`/`ui.drag` take points from the top-left of the window's content, which `ui.inspect`
+reports the grid in, and `ui.screenshot` captures only the GridCraft window.
+
 ## Rules
 
 - Swift 6 language mode, strict concurrency. One `Engine` per document, used from one actor.

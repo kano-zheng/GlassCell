@@ -232,6 +232,14 @@ public final class GridNSView: NSView {
         needsDisplay = true
     }
 
+    /// Where `cell` is drawn now, in this view's coordinates (the control channel clicks there).
+    public func cellFrame(_ cell: CellAddress) -> CGRect? {
+        guard let document, let layout = try? GridRenderer(engine: document.engine, measurer: measurer).layout(size: bounds.size, scroll: scroll) else {
+            return nil
+        }
+        return cgRect(layout.geometry.cellRect(cell: cell))
+    }
+
     /// The edit ended (confirmed or cancelled).
     public func editorEnded() {
         cellEditor.isHidden = true

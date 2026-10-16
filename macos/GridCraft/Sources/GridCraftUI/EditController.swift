@@ -102,6 +102,16 @@ public final class EditController {
         refresh()
     }
 
+    /// The whole text replaced from outside the editors (the control channel), caret at the end.
+    public func replaceText(_ text: String) {
+        guard isEditing else { return }
+        textChanged(text, caret: UInt32(text.utf16.count))
+        revision += 1
+        cellEditor?.sync()
+        formulaBar?.sync()
+        grid?.editorChanged()
+    }
+
     /// The caret moved in an editor (no text change).
     public func caretMoved(_ caret: UInt32) {
         guard caret != self.caret else { return }

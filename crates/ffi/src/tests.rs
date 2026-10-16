@@ -155,3 +155,22 @@ fn page_layout_geometry_has_pages() {
     let g = e.geometry(GridPoint { x: 0.0, y: 0.0 }, GridSize { width: 1200.0, height: 900.0 }, GridPoint { x: 0.0, y: 0.0 }, 0.8).unwrap();
     assert!(g.pages().is_empty());
 }
+
+#[test]
+fn the_journal_lists_commands_without_passwords() {
+    let e = engine();
+    e.execute("cell.set".into(), r#"{"cell": "A1", "input": "1"}"#.into()).unwrap();
+    e.execute("review.protectSheet".into(), r#"{"password": "secret"}"#.into()).unwrap();
+    let journal = e.journal().unwrap();
+    assert!(journal.contains("cell.set"));
+    assert!(!journal.contains("secret"));
+}
+
+#[test]
+fn cell_names_parse_back() {
+    let cell = parse_cell(" $C$7 ".into()).unwrap();
+    assert_eq!((cell.row, cell.col), (6, 2));
+    assert_eq!(cell_name(cell), "C7");
+    assert!(parse_cell("not a cell".into()).is_none());
+    assert!(parse_cell("".into()).is_none());
+}
