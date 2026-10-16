@@ -33,6 +33,9 @@ struct RowState {
     /// Dynamic-array spill ranges and legacy array ranges: cached values inside them (other than
     /// the anchor) are not stored, so the formula can fill them again.
     dynamic: Vec<RangeRef>,
+    /// Dynamic arrays and the areas they spilled over when saved: where two arrays would spill
+    /// over the same cells, the recalculation on open keeps the area of the one that had it.
+    spilled: Vec<(CellRef, RangeRef)>,
     dropped: u64,
     rows: u64,
 }
@@ -55,6 +58,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
             El::default()
         }
     };
+    // The spilled values themselves are laid out again by the recalculation on open.
+    sheet.spill_ranges.extend(st.spilled.drain(..));
     if st.dropped > 0 {
         cx.warn(format!("sheet \"{name}\": {} cells or rows outside the 1,048,576 × 16,384 grid were dropped", st.dropped));
     }
@@ -488,6 +493,9 @@ fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynam
             let range = f.attr("ref").and_then(RangeRef::parse).unwrap_or(RangeRef::cell(pos));
             if !range.is_single() {
                 st.dynamic.push(range);
+                if dynamic && range.start == pos {
+                    st.spilled.push((pos, range));
+                }
             }
             if !dynamic {
                 fm.array = Some(range);

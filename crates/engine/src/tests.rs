@@ -3282,3 +3282,26 @@ fn paste_special_validation_moves_relative_references() {
     assert!(!ok(&mut s, "C3", "5"), "the pasted rule checks C3, not A1");
     assert!(ok(&mut s, "C3", "20"));
 }
+
+/// Two dynamic arrays that would spill over the same cells: the one already spilling keeps its
+/// area, and a full recalculation (as after opening the file) agrees (command-sequence fuzz,
+/// seed 0).
+#[test]
+fn an_existing_spill_keeps_its_area_through_a_full_recalc_and_a_reload() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "C14", "input": "=TRANSPOSE(B18:B24)"})).unwrap();
+    s.execute("range.fill", json!({"input": "=D14:E18", "range": "E13:F13"})).unwrap();
+    assert_eq!(v(&s, "C14"), Value::Number(0.0));
+    assert_eq!(v(&s, "F13"), Value::Error(gridcraft_core::CellError::Spill));
+    let wb = s.doc().unwrap().wb.clone();
+    let mut fresh = (*wb).clone();
+    gridcraft_calc::Calc::new().recalc_all(&mut fresh);
+    let bytes = crate::io::save_bytes(&wb, "spill.xlsx").unwrap();
+    let (mut back, _) = crate::io::open_bytes("spill.xlsx", &bytes).unwrap();
+    gridcraft_calc::Calc::new().recalc_all(&mut back);
+    for other in [&fresh, &back] {
+        let sh = other.active().unwrap();
+        assert_eq!(sh.value(CellRef::parse("C14").unwrap()), Value::Number(0.0));
+        assert_eq!(sh.value(CellRef::parse("F13").unwrap()), Value::Error(gridcraft_core::CellError::Spill));
+    }
+}
