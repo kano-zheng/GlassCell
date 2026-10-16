@@ -86,6 +86,7 @@ public final class GridNSView: NSView {
         do {
             var renderer = GridRenderer(engine: document.engine, measurer: measurer)
             renderer.editing = editor?.isEditing == true
+            renderer.selectedObject = selectedObject?.id
             renderer.formulaLocale = editor?.locale ?? "en"
             let layout = try renderer.draw(in: ctx, size: bounds.size, scroll: scroll)
             layoutCache = layout
@@ -137,6 +138,11 @@ public final class GridNSView: NSView {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         ctx.setStrokeColor(NSColor.secondaryLabelColor.cgColor)
+        if let preview = objectPreview {
+            ctx.setLineWidth(1.5)
+            ctx.setLineDash(phase: 0, lengths: [4, 3])
+            ctx.stroke(preview)
+        }
         if let target = fillPreview ?? movePreview {
             ctx.setLineWidth(1.5)
             ctx.setLineDash(phase: 0, lengths: [4, 3])
@@ -282,12 +288,18 @@ public final class GridNSView: NSView {
         case resizeRow(index: UInt32, start: CGFloat, original: CGFloat)
         /// Moving the selection by its border: grabbed at `grab`.
         case move(grab: CellAddress)
+        /// Moving or resizing a floating object, from screen point `start`.
+        case moveObject(start: CGPoint)
+        case resizeObject(start: CGPoint)
     }
 
     /// The live outcome of a drag, drawn over the grid until the mouse goes up.
     private var fillPreview: CellRange?
     private var movePreview: CellRange?
     private var resizeGuide: (columns: Bool, at: CGFloat, size: CGFloat)?
+    /// The selected floating object, and where a drag would put it.
+    private var selectedObject: SheetObject?
+    private var objectPreview: CGRect?
 
     private var drag = DragKind.none
     /// The cell where the drag started (the selection's anchor).
@@ -345,6 +357,18 @@ public final class GridNSView: NSView {
             needsDisplay = true
             return
         }
+        if p.x >= layout.headerWidth, p.y >= layout.headerHeight, case let .object(_, id, rect) = geometry.hit(x: Float(p.x), y: Float(p.y)),
+           let object = try? document.engine.objects().first(where: { $0.id == id }) {
+            // A floating object: select it; drag to move, or from its corner to resize.
+            let r = cgRect(rect)
+            let corner = hypot(p.x - r.maxX, p.y - r.maxY) < 10
+            drag = corner && selectedObject?.id == id ? .resizeObject(start: p) : .moveObject(start: p)
+            selectedObject = object
+            objectPreview = nil
+            needsDisplay = true
+            return
+        }
+        selectedObject = nil
         if p.x >= layout.headerWidth, p.y >= layout.headerHeight, let current = try? document.engine.selection().ranges.last {
             switch geometry.hit(x: Float(p.x), y: Float(p.y)) {
             case .fillHandle:
@@ -418,6 +442,15 @@ public final class GridNSView: NSView {
             if let current = try? document?.engine.selection().ranges.last {
                 movePreview = moved(current, by: Int(cell.row) - Int(grab.row), Int(cell.col) - Int(grab.col))
             }
+        case let .moveObject(start):
+            if let object = selectedObject {
+                objectPreview = cgRect(layout.geometry.objectRect(anchor: object.anchor)).offsetBy(dx: p.x - start.x, dy: p.y - start.y)
+            }
+        case let .resizeObject(start):
+            if let object = selectedObject {
+                let r = cgRect(layout.geometry.objectRect(anchor: object.anchor))
+                objectPreview = CGRect(x: r.minX, y: r.minY, width: max(20, r.width + p.x - start.x), height: max(20, r.height + p.y - start.y))
+            }
         case let .resizeColumn(_, start, original):
             let size = max(0, original + (p.x - start) / CGFloat(layout.scale))
             resizeGuide = (true, p.x, size)
@@ -437,6 +470,7 @@ public final class GridNSView: NSView {
             fillPreview = nil
             movePreview = nil
             resizeGuide = nil
+            objectPreview = nil
             needsDisplay = true
         }
         guard let document else { return }
@@ -454,6 +488,20 @@ public final class GridNSView: NSView {
                     document.run("edit.cut", ["range": rangeName(range: current)])
                     document.run("edit.paste", ["at": cellName(cell: to.first)])
                 }
+            }
+        case let .moveObject(start):
+            let p = convert(event.locationInWindow, from: nil)
+            if let object = selectedObject, let scale = layoutCache?.scale, p != start,
+               let to = try? document.engine.movedAnchor(anchor: object.anchor, dx: Float(p.x - start.x) / scale, dy: Float(p.y - start.y) / scale) {
+                document.run("object.move", ["kind": object.kind, "id": object.id, "at": cellName(cell: to.cell), "dx": to.dx, "dy": to.dy])
+                selectedObject = try? document.engine.objects().first { $0.id == object.id }
+            }
+        case let .resizeObject(start):
+            let p = convert(event.locationInWindow, from: nil)
+            if let object = selectedObject, let scale = layoutCache?.scale, p != start {
+                let width = max(20, object.anchor.width + Float(p.x - start.x) / scale), height = max(20, object.anchor.height + Float(p.y - start.y) / scale)
+                document.run("object.move", ["kind": object.kind, "id": object.id, "width": width, "height": height])
+                selectedObject = try? document.engine.objects().first { $0.id == object.id }
             }
         case let .resizeColumn(index, _, _):
             if let guide = resizeGuide {
@@ -562,6 +610,12 @@ public final class GridNSView: NSView {
             beginEditing(with: event)
             return
         }
+        if event.specialKey == .backspace || event.specialKey == .delete, !command, let object = selectedObject {
+            document.run("object.delete", ["kind": object.kind, "id": object.id])
+            selectedObject = nil
+            needsDisplay = true
+            return
+        }
         if event.specialKey == .backspace || event.specialKey == .delete, !command {
             // Backspace clears the cell and starts editing it.
             document.run("edit.clearContents")
@@ -584,6 +638,11 @@ public final class GridNSView: NSView {
             }
         case .carriageReturn?, .enter?: moveAfterEntry(down: !shift)
         case .tab?: moveAfterEntry(right: !shift)
+        case .deleteForward? where selectedObject != nil, .delete? where selectedObject != nil:
+            if let object = selectedObject {
+                document.run("object.delete", ["kind": object.kind, "id": object.id])
+                selectedObject = nil
+            }
         case .deleteForward?: document.run("edit.clearContents")
         default:
             super.keyDown(with: event)

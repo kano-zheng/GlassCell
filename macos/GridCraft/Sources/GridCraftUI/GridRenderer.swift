@@ -19,6 +19,8 @@ public struct GridRenderer {
     public var formulaLocale = "en"
     /// A cell is being edited: no fill handle.
     public var editing = false
+    /// The selected floating object (it gets a selection frame).
+    public var selectedObject: UInt32?
 
     public init(engine: Engine, measurer: CoreTextMeasurer) {
         self.engine = engine
@@ -76,6 +78,8 @@ public struct GridRenderer {
             drawSelection(ctx, selection: selection, geometry: geometry, pane: pane)
             ctx.restoreGState()
         }
+        let cells = CGRect(x: layout.headerWidth, y: layout.headerHeight, width: max(0, size.width - layout.headerWidth), height: max(0, size.height - layout.headerHeight))
+        ObjectRenderer(engine: engine, measurer: measurer).draw(ctx, geometry: geometry, scale: layout.scale, cells: cells, selected: selectedObject)
         drawFrozenLines(ctx, geometry: geometry, size: size)
         if sheet.showHeadings {
             drawHeaders(ctx, layout: layout, size: size, selection: selection)
@@ -415,30 +419,9 @@ public struct GridRenderer {
     }
 
     private func drawSparkline(_ ctx: CGContext, _ s: SparklineView, in r: CGRect) {
-        let values = s.values.compactMap { $0 }
-        guard let lo = values.min(), let hi = values.max(), !values.isEmpty, r.width > 0 else { return }
-        let span = hi - lo == 0 ? 1 : hi - lo
-        let color = cgColor(s.color)
-        let step = values.count > 1 ? r.width / CGFloat(values.count - 1) : 0
-        switch s.kind {
-        case .line:
-            ctx.setStrokeColor(color)
-            ctx.setLineWidth(1)
-            ctx.beginPath()
-            for (i, v) in values.enumerated() {
-                let p = CGPoint(x: r.minX + CGFloat(i) * step, y: r.maxY - CGFloat((v - lo) / span) * r.height)
-                if i == 0 { ctx.move(to: p) } else { ctx.addLine(to: p) }
-            }
-            ctx.strokePath()
-        case .column, .winLoss:
-            let w = r.width / CGFloat(values.count)
-            ctx.setFillColor(color)
-            for (i, v) in values.enumerated() {
-                let h = s.kind == .winLoss ? r.height / 2 : max(1, CGFloat((v - lo) / span) * r.height)
-                let y = s.kind == .winLoss ? (v >= 0 ? r.minY : r.midY) : r.maxY - h
-                ctx.fill(CGRect(x: r.minX + CGFloat(i) * w + w * 0.1, y: y, width: w * 0.8, height: h))
-            }
-        }
+        guard r.width > 0, r.height > 0 else { return }
+        let prims = sparklinePrims(kind: s.kind, values: s.values, color: s.color, markers: s.markers, width: Float(r.width), height: Float(r.height))
+        ObjectRenderer(engine: engine, measurer: measurer).drawPrims(ctx, prims, origin: r.origin, scale: 1)
     }
 
     private func drawFilterButton(_ ctx: CGContext, active: Bool, in r: CGRect) {

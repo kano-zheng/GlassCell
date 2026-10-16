@@ -20,6 +20,7 @@ pub mod host_clipboard;
 pub mod io;
 pub mod links;
 pub mod notice;
+pub mod objects;
 pub mod outline;
 pub mod paper;
 pub mod pivot;

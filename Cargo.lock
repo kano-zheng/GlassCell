@@ -1752,6 +1752,7 @@ dependencies = [
 name = "gridcraft-ffi"
 version = "0.7.0"
 dependencies = [
+ "gridcraft-chart",
  "gridcraft-engine",
  "serde_json",
  "thiserror 2.0.21",

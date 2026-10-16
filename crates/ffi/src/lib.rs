@@ -24,10 +24,12 @@ use serde_json::Value as Json;
 
 mod entry;
 mod forms;
+mod objects;
 mod records;
 
 pub use entry::*;
 pub use forms::*;
+pub use objects::*;
 pub use records::*;
 
 uniffi::setup_scaffolding!();
@@ -426,6 +428,12 @@ fn row_of(r: u32) -> u32 {
 
 fn col_of(c: u32) -> u32 {
     c.min(MAX_COLS - 1)
+}
+
+impl GridGeometry {
+    fn geometry(&self) -> &gridcraft_engine::geometry::Geometry {
+        &self.geo
+    }
 }
 
 #[uniffi::export]
