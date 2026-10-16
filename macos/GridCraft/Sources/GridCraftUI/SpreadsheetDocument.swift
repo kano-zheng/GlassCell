@@ -70,21 +70,28 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
     /// Runs a command; errors are kept in `problem` for the window to show.
     @MainActor @discardableResult
     public func run(_ id: String, _ params: [String: Any] = [:]) -> String? {
-        let before = try? engine.history().revision
-        defer { generation += 1 }
         do {
-            let result = try engine.execute(id: id, params: params.isEmpty ? "" : JSON.encode(params))
-            if let history = try? engine.history(), history.revision != before {
-                registerUndo(history.undo.first ?? "")
-            }
-            if let asked = try? engine.takeUiRequests(), !asked.isEmpty {
-                requests.append(contentsOf: asked)
-            }
-            return result
+            return try perform(id, json: params.isEmpty ? "" : JSON.encode(params))
         } catch {
             problem = error.localizedDescription
             return nil
         }
+    }
+
+    /// Runs a command with JSON params, throwing the engine's error (a dialog shows it in place).
+    /// Undo, UI requests and redrawing are handled as for `run`.
+    @MainActor @discardableResult
+    public func perform(_ id: String, json params: String) throws -> String {
+        let before = try? engine.history().revision
+        defer { generation += 1 }
+        let result = try engine.execute(id: id, params: params)
+        if let history = try? engine.history(), history.revision != before {
+            registerUndo(history.undo.first ?? "")
+        }
+        if let asked = try? engine.takeUiRequests(), !asked.isEmpty {
+            requests.append(contentsOf: asked)
+        }
+        return result
     }
 
     /// Runs several commands as one step for Edit ▸ Undo (moving cells is a cut and a paste).

@@ -8,6 +8,7 @@ public struct WorkbookView: View {
     @Environment(\.undoManager) private var undoManager
     @State private var frameTime: Double = 0
     @State private var editor: EditController
+    @State private var form: PresentedForm?
 
     public init(document: SpreadsheetDocument) {
         self.document = document
@@ -23,9 +24,11 @@ public struct WorkbookView: View {
     /// inspector), messages, editing with a template, links.
     private func handle(_ request: UiRequest) {
         switch request {
-        case let .dialog(name, _):
+        case let .dialog(name, params):
             if name == "formatCells" {
                 document.showInspector = true
+            } else if let session = try? document.engine.openForm(name: name, params: params) {
+                form = PresentedForm(session: session)
             } else {
                 document.problem = "The “\(name)” dialog isn't in GridCraft for Mac yet."
             }
@@ -85,6 +88,9 @@ public struct WorkbookView: View {
             WorkbookToolbar(document: document, editor: editor, undoManager: undoManager)
         }
         .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
+        .sheet(item: $form) { presented in
+            FormSheet(form: presented.session, document: document)
+        }
         .sheet(isPresented: $document.showPalette) {
             CommandPalette(document: document, editor: editor)
         }
