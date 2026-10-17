@@ -1,3 +1,4 @@
+import AppKit
 import GridCraftEngine
 @testable import GridCraftUI
 import Testing
@@ -29,5 +30,22 @@ import Testing
         let after = try #require(try document.engine.filterMenu(cell: CellAddress(row: 3, col: 1)))
         #expect(after.values.first { $0.text == "East" }?.shown == false)
         #expect(after.values.first { $0.text == "West" }?.shown == true)
+    }
+
+    @Test func theGridStartsBelowTheFrostedTop() throws {
+        let document = SpreadsheetDocument(sample: "sales")
+        let grid = GridNSView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        grid.document = document
+        grid.topInset = 90
+        #expect(grid.bounds.minY == -90)
+        #expect(grid.gridBounds == CGRect(x: 0, y: 0, width: 800, height: 510))
+        grid.setFrameSize(NSSize(width: 900, height: 700))
+        #expect(grid.bounds.minY == -90 && grid.gridBounds.height == 610)
+        // Rows scrolled past draw (blurred) under the chrome; the cells start below it.
+        grid.scroll(to: CGPoint(x: 0, y: 200))
+        let rep = try #require(grid.bitmapImageRepForCachingDisplay(in: grid.bounds))
+        grid.cacheDisplay(in: grid.bounds, to: rep)
+        let a10 = try #require(grid.cellFrame(CellAddress(row: 9, col: 0)))
+        #expect(grid.gridBounds.minY <= a10.minY)
     }
 }

@@ -376,7 +376,7 @@ enum Control {
     private static func cellPoint(_ name: Any?) throws -> NSPoint {
         guard let text = name as? String, let cell = parseCell(text: text) else { throw Failure("missing or invalid cell") }
         guard let grid = try editor().grid, grid.window === (try window()) else { throw Failure("the workbook has no window") }
-        guard let frame = grid.cellFrame(cell), grid.bounds.contains(CGPoint(x: frame.midX, y: frame.midY)) else {
+        guard let frame = grid.cellFrame(cell), grid.gridBounds.contains(CGPoint(x: frame.midX, y: frame.midY)) else {
             throw Failure("\(cellName(cell: cell)) isn't on screen; scroll there first")
         }
         return grid.convert(CGPoint(x: frame.midX, y: frame.midY), to: nil)

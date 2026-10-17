@@ -21,6 +21,10 @@ public struct GridRenderer {
     public var editing = false
     /// The selected floating object (it gets a selection frame).
     public var selectedObject: UInt32?
+    /// Draw the column headers. Off under the window's frosted top, which draws them itself.
+    public var columnHeaders = true
+    /// The row headers' width, when it must match another layout's.
+    public var headerWidth: CGFloat?
 
     public init(engine: Engine, measurer: CoreTextMeasurer) {
         self.engine = engine
@@ -44,7 +48,10 @@ public struct GridRenderer {
         let headerHeight = sheet.showHeadings ? (21 * chrome).rounded() : 0
         var headerWidth: CGFloat = sheet.showHeadings ? ((2 * 7 + 14) * chrome).rounded() : 0
         var geometry = try engine.geometry(origin: point(headerWidth, headerHeight), size: gridSize(size, headerWidth, headerHeight), scroll: point(scroll.x, scroll.y), scale: scale)
-        if sheet.showHeadings {
+        if sheet.showHeadings, let fixed = self.headerWidth, fixed != headerWidth {
+            headerWidth = fixed
+            geometry = try engine.geometry(origin: point(headerWidth, headerHeight), size: gridSize(size, headerWidth, headerHeight), scroll: point(scroll.x, scroll.y), scale: scale)
+        } else if sheet.showHeadings {
             // The row headers are as wide as the bottom row's number needs.
             let lastRow = geometry.rowAt(y: Float(size.height)) + 1
             let digits = max(2, String(lastRow).count)
@@ -511,38 +518,18 @@ public struct GridRenderer {
         let geometry = layout.geometry
         let hw = layout.headerWidth, hh = layout.headerHeight
         ctx.setFillColor(Palette.header)
-        ctx.fill(CGRect(x: 0, y: 0, width: size.width, height: hh))
         ctx.fill(CGRect(x: 0, y: 0, width: hw, height: size.height))
-        let font = CTFontCreateUIFontForLanguage(.system, 11 * CGFloat(max(0.75, layout.scale / Self.displayScale)), nil) ?? measurer.font(FontFace(name: "Helvetica", bold: false, italic: false), size: 11)
         let current = selection.ranges.last
-        var cols: [UInt32] = [], rows: [UInt32] = []
+        var rows: [UInt32] = []
         for pane in geometry.panes() {
-            cols.append(contentsOf: Array(pane.cols.first...pane.cols.last))
             rows.append(contentsOf: Array(pane.rows.first...pane.rows.last))
         }
+        if columnHeaders {
+            drawColumnHeaders(in: ctx, layout: layout, width: size.width, selection: selection, background: Palette.header)
+        }
+        let font = headerFont(layout)
         ctx.setStrokeColor(Palette.headerLine)
         ctx.setLineWidth(1)
-        for col in Set(cols).sorted() {
-            // The column's own width: in Page Layout view the next column may be on the next page.
-            let cell = cgRect(geometry.cellRect(cell: CellAddress(row: 0, col: col)))
-            let x0 = cell.minX, x1 = cell.maxX
-            guard x1 > x0, x1 > hw, x0 < size.width else { continue }
-            let header = CGRect(x: max(x0, hw), y: 0, width: x1 - max(x0, hw), height: hh)
-            if let current, col >= current.first.col, col <= current.last.col {
-                ctx.setFillColor(Palette.headerSelected)
-                ctx.fill(header)
-            }
-            strokeLine(ctx, from: CGPoint(x: x1 - 0.5, y: 0), to: CGPoint(x: x1 - 0.5, y: hh))
-            let line = makeLine(columnLabel(col: col), font: font, color: Palette.headerText)
-            let (a, d) = bounds(line)
-            let w = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-            if (x1 - x0) > w {
-                ctx.saveGState()
-                ctx.clip(to: header)
-                draw(line, ctx, at: CGPoint(x: (x0 + x1 - w) / 2, y: (hh + a - d) / 2))
-                ctx.restoreGState()
-            }
-        }
         for row in Set(rows).sorted() {
             let rowRect = cgRect(geometry.cellRect(cell: CellAddress(row: row, col: 0)))
             let y0 = rowRect.minY, y1 = rowRect.maxY
@@ -563,10 +550,55 @@ public struct GridRenderer {
                 ctx.restoreGState()
             }
         }
-        strokeLine(ctx, from: CGPoint(x: 0, y: hh - 0.5), to: CGPoint(x: size.width, y: hh - 0.5))
-        strokeLine(ctx, from: CGPoint(x: hw - 0.5, y: 0), to: CGPoint(x: hw - 0.5, y: size.height))
-        ctx.setFillColor(Palette.header)
-        ctx.fill(CGRect(x: 0, y: 0, width: hw - 1, height: hh - 1))
+        strokeLine(ctx, from: CGPoint(x: hw - 0.5, y: columnHeaders ? 0 : hh), to: CGPoint(x: hw - 0.5, y: size.height))
+        if columnHeaders {
+            ctx.setFillColor(Palette.header)
+            ctx.fill(CGRect(x: 0, y: 0, width: hw - 1, height: hh - 1))
+        }
+    }
+
+    private func headerFont(_ layout: Layout) -> CTFont {
+        CTFontCreateUIFontForLanguage(.system, 11 * CGFloat(max(0.75, layout.scale / Self.displayScale)), nil) ?? measurer.font(FontFace(name: "Helvetica", bold: false, italic: false), size: 11)
+    }
+
+    /// The column headers (and the corner) on `background`: the grid's own, or a translucent one
+    /// over the window's frosted top.
+    public func drawColumnHeaders(in ctx: CGContext, layout: Layout, width: CGFloat, selection: SelectionState, background: CGColor) {
+        let geometry = layout.geometry
+        let hw = layout.headerWidth, hh = layout.headerHeight
+        ctx.setFillColor(background)
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: hh))
+        let font = headerFont(layout)
+        let current = selection.ranges.last
+        var cols: [UInt32] = []
+        for pane in geometry.panes() {
+            cols.append(contentsOf: Array(pane.cols.first...pane.cols.last))
+        }
+        ctx.setStrokeColor(Palette.headerLine)
+        ctx.setLineWidth(1)
+        for col in Set(cols).sorted() {
+            // The column's own width: in Page Layout view the next column may be on the next page.
+            let cell = cgRect(geometry.cellRect(cell: CellAddress(row: 0, col: col)))
+            let x0 = cell.minX, x1 = cell.maxX
+            guard x1 > x0, x1 > hw, x0 < width else { continue }
+            let header = CGRect(x: max(x0, hw), y: 0, width: x1 - max(x0, hw), height: hh)
+            if let current, col >= current.first.col, col <= current.last.col {
+                ctx.setFillColor(Palette.headerSelected)
+                ctx.fill(header)
+            }
+            strokeLine(ctx, from: CGPoint(x: x1 - 0.5, y: 0), to: CGPoint(x: x1 - 0.5, y: hh))
+            let line = makeLine(columnLabel(col: col), font: font, color: Palette.headerText)
+            let (a, d) = bounds(line)
+            let w = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+            if (x1 - x0) > w {
+                ctx.saveGState()
+                ctx.clip(to: header)
+                draw(line, ctx, at: CGPoint(x: (x0 + x1 - w) / 2, y: (hh + a - d) / 2))
+                ctx.restoreGState()
+            }
+        }
+        strokeLine(ctx, from: CGPoint(x: 0, y: hh - 0.5), to: CGPoint(x: width, y: hh - 0.5))
+        strokeLine(ctx, from: CGPoint(x: hw - 0.5, y: 0), to: CGPoint(x: hw - 0.5, y: hh))
     }
 
     // MARK: - Text helpers

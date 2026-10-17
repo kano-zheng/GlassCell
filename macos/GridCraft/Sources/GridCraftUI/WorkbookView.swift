@@ -10,6 +10,9 @@ public struct WorkbookView: View {
     @Environment(\.undoManager) private var undoManager
     /// How much of the grid's bottom the status bar covers.
     @State private var statusBarHeight: CGFloat = 0
+    /// How much of the grid's top the toolbar and the formula bar cover.
+    @State private var toolbarHeight: CGFloat = 0
+    @State private var formulaBarHeight: CGFloat = 0
     @State private var editor: EditController
 
     public init(document: SpreadsheetDocument, fileURL: URL? = nil) {
@@ -24,16 +27,23 @@ public struct WorkbookView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            FormulaBar(document: document, editor: editor)
-            Divider()
-            // The grid runs to the window's bottom edge, under the floating status bar.
-            GridView(document: document, editor: editor, bottomInset: statusBarHeight)
-                .overlay(alignment: .bottom) {
-                    WorkbookStatusBar(document: document)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
-                }
-        }
+        // The grid runs under the toolbar and formula bar at the top (their glass frosts the rows
+        // scrolled past) and under the floating status bar at the bottom.
+        Color.clear
+            .overlay(alignment: .top) {
+                FormulaBar(document: document, editor: editor)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { formulaBarHeight = $0 }
+            }
+            .overlay(alignment: .bottom) {
+                WorkbookStatusBar(document: document)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
+            }
+            .background {
+                GridView(document: document, editor: editor, topInset: toolbarHeight + formulaBarHeight, bottomInset: statusBarHeight)
+                    .ignoresSafeArea(.container, edges: .top)
+                    // Under the toolbar: the safe area it leaves at the top.
+                    .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { toolbarHeight = $0 }
+            }
         .overlay(alignment: .top) {
             if document.showPalette {
                 ZStack(alignment: .top) {
@@ -57,6 +67,8 @@ public struct WorkbookView: View {
         }
         // The toolbar shows the name in a capsule of its own.
         .toolbar(removing: .title)
+        // No bar behind the toolbar: its capsules float over the frosted grid.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
         .sheet(item: $document.dialog) { request in
             CustomDialog(request: request, document: document, editor: editor)

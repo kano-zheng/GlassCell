@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import GridCraftEngine
 import SwiftUI
 
@@ -17,6 +18,21 @@ public final class GridNSView: NSView {
     /// Points at the bottom covered by the window's floating status bar: revealing a cell keeps
     /// it above them.
     public var bottomInset: CGFloat = 0
+    /// Points at the top covered by the window's toolbar and formula bar. The grid starts below
+    /// them; above, the rows scrolled past go on under frosted glass, the column headers on it.
+    /// This view's coordinates start where the grid does (its bounds begin at `-topInset`).
+    public var topInset: CGFloat = 0 {
+        didSet {
+            guard topInset != oldValue else { return }
+            setBoundsOrigin(NSPoint(x: 0, y: -topInset))
+            needsDisplay = true
+        }
+    }
+    /// Where the grid is laid out: the view below `topInset`, in this view's coordinates.
+    public var gridBounds: CGRect {
+        CGRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - topInset))
+    }
+    private var gridSize: CGSize { gridBounds.size }
     /// The cell edit shared with the formula bar.
     public var editor: EditController? {
         didSet {
@@ -53,6 +69,61 @@ public final class GridNSView: NSView {
         addSubview(glass)
         return glass
     }()
+
+    public override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        setBoundsOrigin(NSPoint(x: 0, y: -topInset))
+    }
+
+    /// Blurs the rows under the window's chrome.
+    private static let blurContext = CIContext()
+
+    /// Above the cells, frosted: the rows before the first one shown, as if the sheet went on up
+    /// under the window's chrome (not with frozen rows, nor in Page Layout view), blurred and
+    /// washed white; the column headers on top, translucent.
+    private func drawUnderChrome(_ ctx: CGContext, renderer: GridRenderer, layout: GridRenderer.Layout, selection: SelectionState) throws {
+        let area = CGRect(x: 0, y: -topInset, width: bounds.width, height: topInset + layout.headerHeight)
+        ctx.setFillColor(Palette.sheet)
+        ctx.fill(area)
+        if layout.geometry.frozen().row == 0, layout.geometry.pages().isEmpty, let rows = try rowsAbove(renderer: renderer, layout: layout, area: area) {
+            // A flipped context draws images upside down.
+            ctx.saveGState()
+            ctx.translateBy(x: 0, y: area.maxY)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(rows, in: CGRect(x: 0, y: 0, width: area.width, height: area.height))
+            ctx.restoreGState()
+        }
+        ctx.setFillColor(Palette.sheet.copy(alpha: 0.3) ?? Palette.sheet)
+        ctx.fill(area)
+        renderer.drawColumnHeaders(in: ctx, layout: layout, width: bounds.width, selection: selection, background: Palette.header.copy(alpha: 0.55) ?? Palette.header)
+    }
+
+    /// The rows scrolled past, drawn for `area` and blurred.
+    private func rowsAbove(renderer: GridRenderer, layout: GridRenderer.Layout, area: CGRect) throws -> CGImage? {
+        let pixels = window?.backingScaleFactor ?? 2
+        let width = Int((area.width * pixels).rounded(.up)), height = Int((area.height * pixels).rounded(.up))
+        guard width > 0, height > 0, width < 20_000, height < 20_000,
+              let bitmap = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                     space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)
+        else { return nil }
+        // Draw as this view does: flipped, in points, the top of `area` at the top.
+        bitmap.scaleBy(x: pixels, y: pixels)
+        bitmap.translateBy(x: 0, y: area.height)
+        bitmap.scaleBy(x: 1, y: -1)
+        bitmap.translateBy(x: 0, y: -area.minY)
+        let scale = CGFloat(layout.scale)
+        let above = CGPoint(x: scroll.x, y: max(0, scroll.y - area.height / max(scale, 0.01)))
+        var strip = renderer
+        strip.columnHeaders = false
+        strip.headerWidth = layout.headerWidth
+        // Sheet units `above.y` start where `scroll.y` would be minus the area's height.
+        bitmap.translateBy(x: 0, y: (above.y - scroll.y) * scale)
+        try strip.draw(in: bitmap, size: CGSize(width: area.width, height: area.height + layout.headerHeight * 2), scroll: above)
+        guard let sharp = bitmap.makeImage() else { return nil }
+        let image = CIImage(cgImage: sharp)
+        let blurred = image.clampedToExtent().applyingGaussianBlur(sigma: 2.5 * pixels).cropped(to: image.extent)
+        return Self.blurContext.createCGImage(blurred, from: image.extent)
+    }
 
     private let measurer = CoreTextMeasurer()
     private var lastReport: CFAbsoluteTime = 0
@@ -100,7 +171,19 @@ public final class GridNSView: NSView {
             renderer.editing = editor?.isEditing == true
             renderer.selectedObject = selectedObject?.id
             renderer.formulaLocale = editor?.locale ?? "en"
-            let layout = try renderer.draw(in: ctx, size: bounds.size, scroll: scroll)
+            let layout: GridRenderer.Layout
+            if topInset > 0 {
+                // The cells and row headers below the header band, then the frosted top.
+                renderer.columnHeaders = false
+                let planned = try renderer.layout(size: gridSize, scroll: scroll)
+                ctx.saveGState()
+                ctx.clip(to: CGRect(x: 0, y: planned.headerHeight, width: bounds.width, height: max(0, gridSize.height - planned.headerHeight)))
+                layout = try renderer.draw(in: ctx, size: gridSize, scroll: scroll)
+                ctx.restoreGState()
+                try drawUnderChrome(ctx, renderer: renderer, layout: layout, selection: document.engine.selection())
+            } else {
+                layout = try renderer.draw(in: ctx, size: gridSize, scroll: scroll)
+            }
             layoutCache = layout
             drawReferenceOutlines(ctx, layout: layout)
             drawDragPreview(ctx, layout: layout)
@@ -130,7 +213,7 @@ public final class GridNSView: NSView {
     /// While a formula is edited: its references outlined in their colours.
     private func drawReferenceOutlines(_ ctx: CGContext, layout: GridRenderer.Layout) {
         guard let editor, editor.isEditing, !editor.references.isEmpty, let sheet = try? document?.engine.sheet(), sheet.index == editor.sheet else { return }
-        let cells = CGRect(x: layout.headerWidth, y: layout.headerHeight, width: bounds.width - layout.headerWidth, height: bounds.height - layout.headerHeight)
+        let cells = CGRect(x: layout.headerWidth, y: layout.headerHeight, width: bounds.width - layout.headerWidth, height: gridSize.height - layout.headerHeight)
         ctx.saveGState()
         ctx.clip(to: cells)
         for reference in editor.references where reference.sheet == nil || reference.sheet?.caseInsensitiveCompare(sheet.name) == .orderedSame {
@@ -166,7 +249,7 @@ public final class GridNSView: NSView {
             ctx.beginPath()
             if guide.columns {
                 ctx.move(to: CGPoint(x: guide.at, y: 0))
-                ctx.addLine(to: CGPoint(x: guide.at, y: bounds.height))
+                ctx.addLine(to: CGPoint(x: guide.at, y: gridSize.height))
             } else {
                 ctx.move(to: CGPoint(x: 0, y: guide.at))
                 ctx.addLine(to: CGPoint(x: bounds.width, y: guide.at))
@@ -216,7 +299,7 @@ public final class GridNSView: NSView {
 
     /// The editor sits over the edited cell and grows to the right with its text.
     private func positionEditor() {
-        guard let editor, editor.isEditing, let document, let layout = try? GridRenderer(engine: document.engine, measurer: measurer).layout(size: bounds.size, scroll: scroll) else {
+        guard let editor, editor.isEditing, let document, let layout = try? GridRenderer(engine: document.engine, measurer: measurer).layout(size: gridSize, scroll: scroll) else {
             cellEditor.isHidden = true
             popupGlass.isHidden = true
             return
@@ -227,7 +310,7 @@ public final class GridNSView: NSView {
         let width = min(max(r.width, used.width + 12), max(r.width, bounds.width - r.minX))
         let height = max(r.height, used.height + 4)
         cellEditor.frame = NSRect(x: r.minX, y: r.minY, width: width, height: height)
-        cellEditor.isHidden = r.maxX < layout.headerWidth || r.minY > bounds.height
+        cellEditor.isHidden = r.maxX < layout.headerWidth || r.minY > gridSize.height
         let size = popup.fittingSize()
         popupGlass.isHidden = size == .zero || cellEditor.isHidden
         popupGlass.frame = NSRect(x: r.minX, y: cellEditor.frame.maxY + 4, width: size.width, height: size.height)
@@ -247,7 +330,7 @@ public final class GridNSView: NSView {
 
     /// Where `cell` is drawn now, in this view's coordinates (the control channel clicks there).
     public func cellFrame(_ cell: CellAddress) -> CGRect? {
-        guard let document, let layout = try? GridRenderer(engine: document.engine, measurer: measurer).layout(size: bounds.size, scroll: scroll) else {
+        guard let document, let layout = try? GridRenderer(engine: document.engine, measurer: measurer).layout(size: gridSize, scroll: scroll) else {
             return nil
         }
         return cgRect(layout.geometry.cellRect(cell: cell))
@@ -335,6 +418,8 @@ public final class GridNSView: NSView {
         window?.makeFirstResponder(self)
         guard let document, let layout = layoutCache else { return }
         let p = convert(event.locationInWindow, from: nil)
+        // Above the grid is the window's chrome (the frost shows rows scrolled past).
+        guard p.y >= 0 else { return }
         let flags = event.modifierFlags
         keptRanges = flags.contains(.command) ? ((try? document.engine.selection().ranges) ?? []) : []
         let geometry = layout.geometry
@@ -621,7 +706,7 @@ public final class GridNSView: NSView {
         guard let document else { return }
         let flags = event.modifierFlags
         let shift = flags.contains(.shift), command = flags.contains(.command)
-        let page = max(1, Int((bounds.height - (layoutCache?.headerHeight ?? 0)) / max(1, 16 * CGFloat(layoutCache?.scale ?? 0.8) / 0.8)) - 1)
+        let page = max(1, Int((gridSize.height - (layoutCache?.headerHeight ?? 0)) / max(1, 16 * CGFloat(layoutCache?.scale ?? 0.8) / 0.8)) - 1)
         func move(_ dr: Int, _ dc: Int) {
             document.run("selection.move", ["dr": dr, "dc": dc, "extend": shift, "jump": command])
         }
@@ -695,9 +780,9 @@ public final class GridNSView: NSView {
     /// Scrolls the active cell into view.
     public func reveal() {
         guard let document, var layout = layoutCache, let active = try? document.engine.selection().active else { return }
-        if bottomInset > 0, bounds.height > bottomInset * 2,
+        if bottomInset > 0, gridSize.height > bottomInset * 2,
             let uncovered = try? GridRenderer(engine: document.engine, measurer: measurer)
-                .layout(size: CGSize(width: bounds.width, height: bounds.height - bottomInset), scroll: scroll)
+                .layout(size: CGSize(width: bounds.width, height: gridSize.height - bottomInset), scroll: scroll)
         {
             layout = uncovered
         }
@@ -858,7 +943,7 @@ extension GridNSView {
 
     private func layoutCacheForMenu() -> GridRenderer.Layout? {
         guard let document else { return nil }
-        return try? GridRenderer(engine: document.engine, measurer: CoreTextMeasurer()).layout(size: bounds.size, scroll: scroll)
+        return try? GridRenderer(engine: document.engine, measurer: CoreTextMeasurer()).layout(size: gridSize, scroll: scroll)
     }
 
     @objc func runMenuCommand(_ sender: NSMenuItem) {
@@ -902,12 +987,14 @@ extension GridNSView: NSMenuItemValidation {
 public struct GridView: NSViewRepresentable {
     @ObservedObject var document: SpreadsheetDocument
     let editor: EditController
+    var topInset: CGFloat = 0
     var bottomInset: CGFloat = 0
     var onFrame: ((Double) -> Void)?
 
-    public init(document: SpreadsheetDocument, editor: EditController, bottomInset: CGFloat = 0, onFrame: ((Double) -> Void)? = nil) {
+    public init(document: SpreadsheetDocument, editor: EditController, topInset: CGFloat = 0, bottomInset: CGFloat = 0, onFrame: ((Double) -> Void)? = nil) {
         self.document = document
         self.editor = editor
+        self.topInset = topInset
         self.bottomInset = bottomInset
         self.onFrame = onFrame
     }
@@ -918,6 +1005,7 @@ public struct GridView: NSViewRepresentable {
         view.editor = editor
         view.onFrame = onFrame
         view.bottomInset = bottomInset
+        view.topInset = topInset
         return view
     }
 
@@ -926,6 +1014,8 @@ public struct GridView: NSViewRepresentable {
         view.document = document
         view.onFrame = onFrame
         view.bottomInset = bottomInset
+        view.topInset = topInset
         view.needsDisplay = true
     }
 }
+
