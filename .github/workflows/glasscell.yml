@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Xcode (the newest on the runner)
         run: |
-          xcode=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          xcode=$(printf '%s\n' /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
           sudo xcode-select -s "$xcode"
           xcodebuild -version
       - name: Tools
