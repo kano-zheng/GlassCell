@@ -3,7 +3,7 @@ import GridCraftEngine
 import SwiftUI
 
 /// A header's filter dropdown (its ▾ button): sort the column, or choose the values it shows.
-/// It opens in a popover, which macOS draws in Liquid Glass.
+/// It floats over the window on a pane of glass (`FilterMenuOverlay`).
 struct FilterMenuView: View {
     @ObservedObject var document: SpreadsheetDocument
     let menu: FilterMenu
@@ -74,6 +74,7 @@ struct FilterMenuView: View {
         .padding(14)
         .frame(width: 260)
         .onAppear { searchFocused = true }
+        .onExitCommand { close() }
     }
 
     private func menuButton(_ title: LocalizedStringKey, _ symbol: String, action: @escaping () -> Void) -> some View {
@@ -107,14 +108,57 @@ struct FilterMenuView: View {
     }
 }
 
+/// A filter dropdown that is open: its contents, and the ▾ it hangs from (window content
+/// coordinates, from the top-left).
+struct OpenFilterMenu: Identifiable {
+    let id = UUID()
+    let menu: FilterMenu
+    let anchor: CGRect
+}
+
+/// The filter dropdown floating over the window on a pane of glass, under its ▾ (above it when
+/// there is no room below), kept inside the window. A click beside it or Esc closes it.
+struct FilterMenuOverlay: View {
+    @ObservedObject var document: SpreadsheetDocument
+    let open: OpenFilterMenu
+    @State private var height: CGFloat = 420
+
+    private static let width: CGFloat = 260
+    private static let margin: CGFloat = 8
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let x = min(max(Self.margin, open.anchor.midX - Self.width / 2), max(Self.margin, size.width - Self.width - Self.margin))
+            let below = open.anchor.maxY + 6
+            let y = below + height <= size.height - Self.margin ? below : max(Self.margin, open.anchor.minY - 6 - height)
+            ZStack(alignment: .topLeading) {
+                // A click beside the menu closes it (a button: a tap gesture missed clicks).
+                Button { document.filterMenu = nil } label: { Color.clear.contentShape(.rect) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close the filter menu")
+                FilterMenuView(document: document, menu: open.menu) { document.filterMenu = nil }
+                    .glassEffect(.regular, in: .rect(cornerRadius: 20))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+                    .offset(x: x, y: y)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
 extension GridNSView {
     /// Opens the filter dropdown of header `cell` under its button at `rect` (view coordinates).
     func showFilterMenu(for cell: CellAddress, at rect: CGRect) {
-        guard let document, let menu = try? document.engine.filterMenu(cell: cell) else { return }
-        let popover = NSPopover()
-        popover.behavior = .transient
-        let close = { [weak popover] in popover?.performClose(nil) ?? () }
-        popover.contentViewController = NSHostingController(rootView: FilterMenuView(document: document, menu: menu, close: close))
-        popover.show(relativeTo: rect, of: self, preferredEdge: .maxY)
+        guard let document, let menu = try? document.engine.filterMenu(cell: cell),
+              let content = window?.contentView
+        else { return }
+        // Window content coordinates from the top-left, where the window's overlay lays it out.
+        var anchor = content.convert(convert(rect, to: nil), from: nil)
+        if !content.isFlipped {
+            anchor.origin.y = content.bounds.height - anchor.maxY
+        }
+        document.filterMenu = OpenFilterMenu(menu: menu, anchor: anchor)
     }
 }

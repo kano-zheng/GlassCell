@@ -85,10 +85,10 @@ public struct WorkbookView: View {
         .overlay(alignment: .top) {
             if document.showPalette {
                 ZStack(alignment: .top) {
-                    // A click beside the palette closes it.
-                    Color.clear
-                        .contentShape(.rect)
-                        .onTapGesture { document.showPalette = false }
+                    // A click beside the palette closes it (a button: a tap gesture missed clicks).
+                    Button { document.showPalette = false } label: { Color.clear.contentShape(.rect) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Close the command palette")
                     CommandPalette(document: document, editor: editor)
                         .padding(.top, 40)
                 }
@@ -96,6 +96,12 @@ public struct WorkbookView: View {
             }
         }
         .animation(.smooth(duration: 0.2), value: document.showPalette)
+        .overlay {
+            if let open = document.filterMenu {
+                FilterMenuOverlay(document: document, open: open)
+            }
+        }
+        .animation(.smooth(duration: 0.2), value: document.filterMenu?.id)
         .toolbar(id: "gridcraft.workbook") {
             WorkbookToolbar(document: document, editor: editor, undoManager: undoManager, fileURL: fileURL)
         }

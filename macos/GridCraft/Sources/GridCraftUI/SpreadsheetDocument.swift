@@ -32,6 +32,8 @@ public final class SpreadsheetDocument: ReferenceFileDocument, @unchecked Sendab
     @Published var form: PresentedForm?
     /// The Mac's own dialog shown as a sheet, if any.
     @Published var dialog: DialogRequest?
+    /// The filter dropdown floating under a header's ▾, if one is open.
+    @Published var filterMenu: OpenFilterMenu?
 
     /// A new workbook: empty, or one of the engine's samples (`sales`, `budget`, `grades`).
     public init(sample: String? = nil) {

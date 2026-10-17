@@ -249,6 +249,7 @@ enum Control {
         guard let document = registry.frontmost else { return state }
         state["inspector"] = document.showInspector
         state["palette"] = document.showPalette
+        state["filterMenu"] = document.filterMenu.map { $0.menu.column as Any } ?? NSNull()
         state["message"] = document.problem ?? NSNull()
         state["notice"] = document.notice ?? NSNull()
         state["dialog"] = dialogState(document) ?? NSNull()
