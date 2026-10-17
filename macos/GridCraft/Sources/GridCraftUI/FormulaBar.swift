@@ -22,32 +22,44 @@ public struct FormulaBar: View {
     }
 
     public var body: some View {
-        HStack(spacing: 6) {
-            TextField("Name Box", text: $nameBox)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 110)
-                .focused($nameBoxFocused)
-                .onSubmit {
-                    let target = nameBox.trimmingCharacters(in: .whitespaces)
-                    if !target.isEmpty, target != shownName {
-                        document.run("edit.nameBox", ["text": target])
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("Name Box", text: $nameBox)
+                    .textFieldStyle(.plain)
+                    .focused($nameBoxFocused)
+                    .onSubmit {
+                        let target = nameBox.trimmingCharacters(in: .whitespaces)
+                        if !target.isEmpty, target != shownName {
+                            document.run("edit.nameBox", ["text": target])
+                        }
+                        nameBoxFocused = false
+                        nameBox = shownName
+                        editor.grid?.editorEnded()
                     }
-                    nameBoxFocused = false
-                    nameBox = shownName
-                    editor.grid?.editorEnded()
+                    .onChange(of: shownName) { _, name in
+                        if !nameBoxFocused { nameBox = name }
+                    }
+                    .onAppear { nameBox = shownName }
+                    .padding(.horizontal, 12)
+                    .frame(width: 120, height: Self.height)
+                    .glassEffect(.regular, in: .capsule)
+                HStack(spacing: 6) {
+                    Image(systemName: "function")
+                        .foregroundStyle(.secondary)
+                    FormulaTextField(document: document, editor: editor)
+                        .frame(minHeight: 20, maxHeight: 20)
                 }
-                .onChange(of: shownName) { _, name in
-                    if !nameBoxFocused { nameBox = name }
-                }
-                .onAppear { nameBox = shownName }
-            Image(systemName: "function")
-                .foregroundStyle(.secondary)
-            FormulaTextField(document: document, editor: editor)
-                .frame(minHeight: 22, maxHeight: 22)
+                .padding(.horizontal, 12)
+                .frame(height: Self.height)
+                .glassEffect(.regular, in: .capsule)
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
+
+    /// The capsules' height, a little under the toolbar's controls.
+    private static let height: CGFloat = 30
 }
 
 /// The formula bar's text: a `CellTextView` sharing the cell edit.
@@ -59,8 +71,11 @@ struct FormulaTextField: NSViewRepresentable {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = false
         scroll.hasHorizontalScroller = false
-        scroll.borderType = .bezelBorder
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
         let text = CellTextView(frame: .zero, formulaBar: true)
+        // The capsule's glass shows through.
+        text.drawsBackground = false
         text.controller = editor
         text.baseFont = .monospacedSystemFont(ofSize: 12, weight: .regular)
         text.textContainer?.widthTracksTextView = true

@@ -427,6 +427,15 @@ enum Control {
                 try window().sendEvent(event)
                 return
             }
+            if let text = target as? NSTextView {
+                // A text view's mouseDown tracks the mouse in a loop of its own until a real
+                // release: put the insertion point under the click instead.
+                mouseTarget = nil
+                text.window?.makeFirstResponder(text)
+                let at = text.characterIndexForInsertion(at: text.convert(point, from: nil))
+                text.setSelectedRange(NSRange(location: min(at, (text.string as NSString).length), length: 0))
+                return
+            }
             mouseTarget = target
             target.window?.makeFirstResponder(target.acceptsFirstResponder ? target : target.window?.firstResponder)
             target.mouseDown(with: event)
