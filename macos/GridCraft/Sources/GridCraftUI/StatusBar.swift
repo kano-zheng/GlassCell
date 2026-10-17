@@ -1,3 +1,4 @@
+import AppKit
 import GridCraftEngine
 import SwiftUI
 
@@ -9,6 +10,8 @@ struct WorkbookStatusBar: View {
     let scrollState: GridScrollState
     /// Scrolls the grid across to an offset.
     let scrollTo: (CGFloat) -> Void
+    /// The scroll wheel over the scroller.
+    let wheel: (NSEvent) -> Void
     @Namespace private var tabs
 
     private var sheet: SheetInfo? {
@@ -37,8 +40,8 @@ struct WorkbookStatusBar: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .help("Insert Sheet")
                 }
-                if scrollState.extent > 0 {
-                    HorizontalScroller(state: scrollState, scroll: scrollTo)
+                if scrollState.extentX > 0 {
+                    GlassScroller(axis: .horizontal, state: scrollState, scroll: scrollTo, wheel: wheel)
                         .frame(minWidth: 80, maxWidth: .infinity)
                 } else {
                     Spacer(minLength: 8)

@@ -63,7 +63,7 @@ import Testing
         #expect(cell.maxX <= grid.bounds.width - 310)
     }
 
-    @Test func theGridTellsTheScrollerWhereItIs() async throws {
+    @Test func theGridTellsTheScrollersWhereItIs() async throws {
         let document = SpreadsheetDocument(sample: "sales")
         let grid = GridNSView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
         let state = GridScrollState()
@@ -72,13 +72,14 @@ import Testing
         let rep = try #require(grid.bitmapImageRepForCachingDisplay(in: grid.bounds))
         // The first pass opens the sheet where its file left it; then scroll.
         grid.cacheDisplay(in: grid.bounds, to: rep)
-        grid.scroll(to: CGPoint(x: 120, y: 0))
+        grid.scroll(to: CGPoint(x: 120, y: 300))
         grid.cacheDisplay(in: grid.bounds, to: rep)
         // It reports after the display pass.
-        for _ in 0..<10 where state.x != 120 { await Task.yield() }
-        #expect(state.x == 120)
-        #expect(state.visible > 0)
-        // An empty sheet past column I still scrolls on to column Z, or to where the view is.
-        #expect(state.extent >= 120)
+        for _ in 0..<10 where state.y != 300 { await Task.yield() }
+        #expect(state.x == 120 && state.y == 300)
+        #expect(state.visibleX > 0 && state.visibleY > 0)
+        // The scroll bars reach column Z and row 100 at least, or where the view is.
+        #expect(state.extentX >= 120 && state.extentY >= 300)
+        #expect(state.cellsTop > 0)
     }
 }

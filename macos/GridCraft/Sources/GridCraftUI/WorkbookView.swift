@@ -12,6 +12,8 @@ public struct WorkbookView: View {
     @State private var statusBarHeight: CGFloat = 0
     static let inspectorWidth: CGFloat = 300
     static let inspectorMargin: CGFloat = 10
+    /// Room between the vertical scroller and what is right of it.
+    static let scrollerMargin: CGFloat = 6
     /// How much of the grid's top the toolbar and the formula bar cover.
     @State private var toolbarHeight: CGFloat = 0
     @State private var formulaBarHeight: CGFloat = 0
@@ -39,12 +41,23 @@ public struct WorkbookView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { formulaBarHeight = $0 }
             }
             .overlay(alignment: .bottom) {
-                WorkbookStatusBar(document: document, scrollState: scrollState) { x in
+                WorkbookStatusBar(document: document, scrollState: scrollState, scrollTo: { x in
                     if let grid = editor.grid { grid.scroll(to: CGPoint(x: x, y: grid.scroll.y)) }
-                }
+                }, wheel: { editor.grid?.scrollWheel(with: $0) })
                     // Its statistics move out from under the inspector.
                     .padding(.trailing, document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
+            }
+            .overlay(alignment: .topTrailing) {
+                // The vertical scroller, down the grid's right edge (left of the inspector).
+                if scrollState.extentY > 0 {
+                    GlassScroller(axis: .vertical, state: scrollState, scroll: { y in
+                        if let grid = editor.grid { grid.scroll(to: CGPoint(x: grid.scroll.x, y: y)) }
+                    }, wheel: { editor.grid?.scrollWheel(with: $0) })
+                    .padding(.top, formulaBarHeight + scrollState.cellsTop + 6)
+                    .padding(.bottom, statusBarHeight + 4)
+                    .padding(.trailing, Self.scrollerMargin + (document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0))
+                }
             }
             .overlay(alignment: .topTrailing) {
                 // The inspector floats over the grid on a pane of glass.
@@ -62,7 +75,9 @@ public struct WorkbookView: View {
             .animation(.smooth(duration: 0.25), value: document.showInspector)
             .background {
                 GridView(document: document, editor: editor, topInset: toolbarHeight + formulaBarHeight, bottomInset: statusBarHeight,
-                         trailingInset: document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0, scrollState: scrollState)
+                         trailingInset: GlassScroller.thickness(.vertical) + Self.scrollerMargin * 2
+                             + (document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0),
+                         scrollState: scrollState)
                     .ignoresSafeArea(.container, edges: .top)
                     // Under the toolbar: the safe area it leaves at the top.
                     .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { toolbarHeight = $0 }

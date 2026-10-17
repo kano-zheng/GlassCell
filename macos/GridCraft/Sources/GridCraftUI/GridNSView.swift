@@ -83,12 +83,20 @@ public final class GridNSView: NSView {
     /// change while AppKit draws).
     private func publishScroll(_ layout: GridRenderer.Layout) {
         guard let state = scrollState else { return }
-        let extent = CGFloat(layout.geometry.scrollExtent().x)
-        let shown = bounds.width - layout.headerWidth - CGFloat(layout.geometry.frozenSize().width) - trailingInset
-        let visible = max(0, shown / max(CGFloat(layout.scale), 0.01))
-        let x = scroll.x
-        guard state.x != x || state.extent != extent || state.visible != visible else { return }
-        Task { @MainActor in state.update(x: x, extent: extent, visible: visible) }
+        let extent = layout.geometry.scrollExtent()
+        let frozen = layout.geometry.frozenSize()
+        let scale = max(CGFloat(layout.scale), 0.01)
+        let across = bounds.width - layout.headerWidth - CGFloat(frozen.width) - trailingInset
+        let down = gridSize.height - layout.headerHeight - CGFloat(frozen.height) - bottomInset
+        let values = (x: scroll.x, y: scroll.y, extentX: CGFloat(extent.x), extentY: CGFloat(extent.y),
+                      visibleX: max(0, across / scale), visibleY: max(0, down / scale), cellsTop: layout.headerHeight + CGFloat(frozen.height))
+        guard state.x != values.x || state.y != values.y || state.extentX != values.extentX || state.extentY != values.extentY
+            || state.visibleX != values.visibleX || state.visibleY != values.visibleY || state.cellsTop != values.cellsTop
+        else { return }
+        Task { @MainActor in
+            state.update(x: values.x, y: values.y, extentX: values.extentX, extentY: values.extentY,
+                         visibleX: values.visibleX, visibleY: values.visibleY, cellsTop: values.cellsTop)
+        }
     }
 
     /// Blurs the rows under the window's chrome.
