@@ -70,7 +70,7 @@ GlassCell keeps GridCraft's rules:
 - **Never crash.** No panics in the engine, no force-unwraps in the app.
 - **Everything is a command.** The app changes a workbook only through the engine's commands.
 
-The full rules for contributors (people and agents) are in [`CLAUDE.md`](CLAUDE.md).
+The full rules for contributors (people and agents) are in [`AGENTS.md`](AGENTS.md).
 
 ## License
 
