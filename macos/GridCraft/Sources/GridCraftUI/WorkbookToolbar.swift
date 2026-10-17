@@ -35,14 +35,37 @@ struct WorkbookToolbar: CustomizableToolbarContent {
         .help(label)
     }
 
+    /// An alignment button: on when the active cell has that alignment.
+    private func align(_ id: String, _ label: String, _ symbol: String, _ value: HAlign) -> some View {
+        Toggle(isOn: Binding(get: { format?.active.halign == value }, set: { _ in run(id) })) {
+            Label(label, systemImage: symbol)
+        }
+        .toggleStyle(.button)
+        .help(label)
+    }
+
+    /// A thin line between two groups of the long capsule.
+    private func divider(_ id: String) -> some CustomizableToolbarContent {
+        ToolbarItem(id: id) {
+            // A toolbar lays a Divider out horizontally.
+            Rectangle()
+                .fill(.separator)
+                .frame(width: 1, height: 18)
+                .padding(.horizontal, 4)
+        }
+        .customizationBehavior(.disabled)
+    }
+
     var body: some CustomizableToolbarContent {
-        // Neighbouring items share one piece of glass; spacers split the groups.
-        ToolbarItem(id: "undo", placement: .navigation) {
+        // Neighbouring items share one piece of glass: the editing commands make one long
+        // capsule; spacers set the view items apart.
+        ToolbarItem(id: "undo") {
             Button("Undo", systemImage: "arrow.uturn.backward") { undoManager?.undo() }
         }
-        ToolbarItem(id: "redo", placement: .navigation) {
+        ToolbarItem(id: "redo") {
             Button("Redo", systemImage: "arrow.uturn.forward") { undoManager?.redo() }
         }
+        divider("fontGroup")
         ToolbarItem(id: "formatPainter") {
             Button("Format Painter", systemImage: "paintbrush.pointed") { run("edit.formatPainter") }
                 .help("Format Painter")
@@ -58,7 +81,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             }
             .help("Font Size")
         }
-        ToolbarSpacer(.fixed)
+        divider("fontStyleGroup")
         ToolbarItem(id: "bold") {
             toggle("home.bold", "Bold", "bold", isOn: format?.active.bold)
         }
@@ -74,23 +97,17 @@ struct WorkbookToolbar: CustomizableToolbarContent {
         ToolbarItem(id: "fill") {
             ColorMenu(title: "Fill Color", symbol: "drop.halffull", automatic: "No Fill") { hex in run("home.fillColor", ["color": hex ?? "none"]) }
         }
-        ToolbarSpacer(.fixed)
-        ToolbarItem(id: "alignment") {
-            Picker("Alignment", selection: Binding(get: { format?.active.halign ?? .general }, set: { align in
-                switch align {
-                case .left: run("home.alignLeft")
-                case .center: run("home.alignCenter")
-                case .right: run("home.alignRight")
-                default: break
-                }
-            })) {
-                Label("Align Left", systemImage: "text.alignleft").tag(HAlign.left)
-                Label("Center", systemImage: "text.aligncenter").tag(HAlign.center)
-                Label("Align Right", systemImage: "text.alignright").tag(HAlign.right)
-            }
-            .pickerStyle(.segmented)
-            .help("Alignment")
+        divider("alignmentGroup")
+        ToolbarItem(id: "alignLeft") {
+            align("home.alignLeft", "Align Left", "text.alignleft", .left)
         }
+        ToolbarItem(id: "alignCenter") {
+            align("home.alignCenter", "Center", "text.aligncenter", .center)
+        }
+        ToolbarItem(id: "alignRight") {
+            align("home.alignRight", "Align Right", "text.alignright", .right)
+        }
+        divider("cellGroup")
         ToolbarItem(id: "wrap") {
             toggle("home.wrapText", "Wrap Text", "text.word.spacing", isOn: format?.active.wrap)
         }
@@ -98,7 +115,6 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             Button("Merge & Center", systemImage: "arrow.left.and.right.square") { run("home.mergeCenter") }
                 .help("Merge & Center")
         }
-        ToolbarSpacer(.fixed)
         ToolbarItem(id: "borders") {
             Menu {
                 ForEach(Self.borderPresets, id: \.preset) { item in
@@ -128,19 +144,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             .help("Number Format")
             .menuIndicator(.hidden)
         }
-        ToolbarSpacer(.fixed)
-        ToolbarItem(id: "autoSum") {
-            Menu {
-                ForEach(["SUM", "AVERAGE", "COUNT", "MAX", "MIN"], id: \.self) { function in
-                    Button(function.capitalized) { run("formulas.autoSum", ["function": function]) }
-                }
-            } label: {
-                Label("AutoSum", systemImage: "sum")
-            } primaryAction: {
-                run("formulas.autoSum")
-            }
-            .help("AutoSum")
-        }
+        divider("dataGroup")
         ToolbarItem(id: "sortFilter") {
             Menu {
                 Button("Sort A to Z") { run("data.sortAscending") }
@@ -176,6 +180,23 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             }
             .help("Insert")
             .menuIndicator(.hidden)
+        }
+        // The functions: a capsule of their own.
+        ToolbarSpacer(.fixed)
+        ToolbarItem(id: "autoSum") {
+            Button("AutoSum", systemImage: "sum") { run("formulas.autoSum") }
+                .help("AutoSum")
+        }
+        ToolbarItem(id: "autoSumMenu") {
+            Menu {
+                ForEach(["SUM", "AVERAGE", "COUNT", "MAX", "MIN"], id: \.self) { function in
+                    Button(function.capitalized) { run("formulas.autoSum", ["function": function]) }
+                }
+            } label: {
+                Label("AutoSum Functions", systemImage: "chevron.down")
+            }
+            .menuIndicator(.hidden)
+            .help("AutoSum Functions")
         }
         ToolbarSpacer(.flexible)
         ToolbarItem(id: "zoom") {
