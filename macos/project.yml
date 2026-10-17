@@ -51,3 +51,10 @@ targets:
         INFOPLIST_FILE: GridCraft/Resources/QuickLook/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: GridCraft/Resources/QuickLook/QuickLook.entitlements
+schemes:
+  # Its own name: the package's executable product is also called GridCraft, and xcodebuild
+  # picked either scheme of that name (then built no app).
+  GridCraftApp:
+    build:
+      targets:
+        GridCraft: all

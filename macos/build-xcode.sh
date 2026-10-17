@@ -4,6 +4,7 @@
 #
 #   macos/build-xcode.sh               # release; builds the engine first unless SKIP_ENGINE=1
 #   CONFIG=Debug macos/build-xcode.sh
+#   ARCHS=arm64 macos/build-xcode.sh  # this Mac's architecture only (as the engine was built)
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,11 +19,10 @@ echo "== Xcode project"
 (cd "$ROOT/macos" && xcodegen generate --quiet --spec project.yml)
 
 echo "== GridCraft.app ($CONFIG)"
-# Xcode's build database can recompile a changed GridCraftUI and then skip relinking the app
-# (or skip making a deleted one): let it plan afresh, and make the app anew.
-rm -rf "$OUT/xcode/Build/Intermediates.noindex/XCBuildData" "$OUT/xcode/Build/Products/$CONFIG/GridCraft.app"
-xcodebuild -project "$ROOT/macos/GridCraft.xcodeproj" -scheme GridCraft -configuration "$CONFIG" \
-    -derivedDataPath "$OUT/xcode" -destination 'platform=macOS' build -quiet
+# A fresh app every time, so an old one is never copied.
+rm -rf "$OUT/xcode/Build/Products/$CONFIG/GridCraft.app"
+xcodebuild -project "$ROOT/macos/GridCraft.xcodeproj" -scheme GridCraftApp -configuration "$CONFIG" \
+    -derivedDataPath "$OUT/xcode" -destination 'platform=macOS' ARCHS="${ARCHS:-arm64 x86_64}" build -quiet
 mkdir -p "$OUT"
 rm -rf "$OUT/GridCraft.app"
 APP="$OUT/xcode/Build/Products/$CONFIG/GridCraft.app"
