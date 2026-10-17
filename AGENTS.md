@@ -1,6 +1,6 @@
-# GridCraft for Mac — instructions for agents
+# GlassCell — instructions for agents
 
-This repository is a **fork** of [GridCraft](https://github.com/storytold/gridcraft), the clean-room, open-source, Rust-native spreadsheet targeting Microsoft Excel parity. The fork keeps GridCraft's Rust engine and adds a **native macOS frontend written in SwiftUI** (macOS 26+, adopting the newest SwiftUI/AppKit features), with a Mac-style **toolbar + inspector + menu bar** instead of Excel's ribbon.
+This repository is **GlassCell**, an independent, open-source **fork** of [GridCraft](https://github.com/storytold/gridcraft), the clean-room, open-source, Rust-native spreadsheet targeting Microsoft Excel parity. The fork keeps GridCraft's Rust engine and adds a **native macOS frontend written in SwiftUI** (macOS 26+, adopting the newest SwiftUI/AppKit features), with a Mac-style **toolbar + inspector + menu bar** instead of Excel's ribbon.
 
 - The Rust engine (`crates/*` below L6) is shared with upstream. The egui frontend (`crates/ui-egui`, `apps/gridcraft`, `apps/gridcraft-web`) stays in the tree as the behaviour reference and must keep building, so merges from upstream stay cheap.
 - Remote `upstream` = `storytold/gridcraft` (fetch only; pushing to it is disabled). Sync with `git fetch upstream && git merge upstream/main`. Keep edits to upstream-owned files small and focused so merges stay easy.
@@ -59,7 +59,7 @@ Swift (`macos/`):
 - **For UI work, look at the result:** run the app and screenshot it, and compare behaviour with the egui frontend.
 
 ## Running
-- Mac app: see `macos/README.md` once it exists.
+- Mac app (GlassCell): see `macos/README.md`.
 - egui reference app: `cargo run --release -p gridcraft -- --sample sales --control 7979`. Drive it with JSON lines on `127.0.0.1:7979` (methods: `crates/ui-egui/src/control.rs`, docs: `docs/control-protocol.md`).
 - Offscreen egui render: `cargo run -p gridcraft-ui-egui --example snapshot -- --sample sales out.png`.
 - Headless: `gridcraft-cli eval '=SUM(1,2,3)'`, `gridcraft-cli run --in book.xlsx --cmd 'home.bold={"range":"A1:C1"}' --out book.xlsx`, `gridcraft-cli mcp`.

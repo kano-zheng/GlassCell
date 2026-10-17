@@ -1,28 +1,29 @@
 #!/bin/bash
-# Builds GridCraft.app (the SwiftUI app with its document types) into target/mac/.
+# Builds GlassCell.app (the SwiftUI app with its document types) into target/mac/.
 #
 #   macos/build-app.sh          # release; builds the engine first unless SKIP_ENGINE=1
 #   CONFIG=debug macos/build-app.sh
-#   open target/mac/GridCraft.app
+#   open target/mac/GlassCell.app
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CONFIG=${CONFIG:-release}
 OUT="$ROOT/target/mac"
-APP="$OUT/GridCraft.app"
+APP="$OUT/GlassCell.app"
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)
 
 if [ "${SKIP_ENGINE:-0}" != 1 ]; then
     PROFILE=$([ "$CONFIG" = debug ] && echo dev || echo release) "$ROOT/macos/build-engine.sh"
 fi
 
-echo "== GridCraft ($CONFIG)"
+echo "== GlassCell ($CONFIG)"
 swift build --package-path "$ROOT/macos/GridCraft" -c "$CONFIG" --product GridCraft
 BIN=$(swift build --package-path "$ROOT/macos/GridCraft" -c "$CONFIG" --show-bin-path)
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/GridCraft" "$APP/Contents/MacOS/GridCraft"
+# The package names its executable for the engine; the app is GlassCell.
+cp "$BIN/GridCraft" "$APP/Contents/MacOS/GlassCell"
 sed -e "s/\$(MARKETING_VERSION)/$VERSION/g" -e "s/\$(CURRENT_PROJECT_VERSION)/$VERSION/g" "$ROOT/macos/GridCraft/Resources/Info.plist" > "$APP/Contents/Info.plist"
 # The String Catalog, compiled to .lproj tables.
 xcrun xcstringstool compile "$ROOT/macos/GridCraft/Resources/Localizable.xcstrings" --output-directory "$APP/Contents/Resources" >/dev/null

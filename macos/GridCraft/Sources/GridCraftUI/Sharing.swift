@@ -29,7 +29,7 @@ public struct SharedWorkbook: Transferable, Sendable {
     /// Writes the workbook into a fresh temporary folder under its name.
     func write() async throws -> URL {
         let data = try await MainActor.run { try document.snapshot(contentType: .xlsx) }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("GridCraft Share \(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("GlassCell Share \(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(name)
         try data.write(to: url)
@@ -65,7 +65,7 @@ public enum WorkbookSpotlight {
         guard let fileURL, let item = item(for: document, fileURL: fileURL) else { return }
         CSSearchableIndex.default().indexSearchableItems([item]) { error in
             if let error {
-                FileHandle.standardError.write(Data("GridCraft Spotlight: \(error.localizedDescription)\n".utf8))
+                FileHandle.standardError.write(Data("GlassCell Spotlight: \(error.localizedDescription)\n".utf8))
             }
         }
     }

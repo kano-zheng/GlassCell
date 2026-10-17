@@ -1,7 +1,8 @@
-# XcodeGen spec for GridCraft.app with its extensions (App Intents metadata and app extensions
-# need Xcode's build system). macos/build-xcode.sh generates GridCraft.xcodeproj (not committed)
-# and builds it. The SwiftPM package (macos/GridCraft) stays the place for code and tests.
-name: GridCraft
+# XcodeGen spec for GlassCell.app with its extensions (App Intents metadata and app extensions
+# need Xcode's build system). macos/build-xcode.sh generates GlassCell.xcodeproj (not committed)
+# and builds it. The SwiftPM package (macos/GridCraft, named for the engine) stays the place for
+# code and tests.
+name: GlassCell
 options:
   deploymentTarget:
     macOS: "26.0"
@@ -19,7 +20,7 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     DEAD_CODE_STRIPPING: YES
 targets:
-  GridCraft:
+  GlassCell:
     type: application
     platform: macOS
     sources:
@@ -32,8 +33,8 @@ targets:
       - target: GridCraftQuickLook
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.gridcraft.mac
-        PRODUCT_NAME: GridCraft
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.kano-zheng.glasscell
+        PRODUCT_NAME: GlassCell
         INFOPLIST_FILE: GridCraft/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
   GridCraftQuickLook:
@@ -46,15 +47,15 @@ targets:
         product: GridCraftUI
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.gridcraft.mac.quicklook
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.kano-zheng.glasscell.quicklook
         PRODUCT_NAME: GridCraftQuickLook
         INFOPLIST_FILE: GridCraft/Resources/QuickLook/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: GridCraft/Resources/QuickLook/QuickLook.entitlements
 schemes:
-  # Its own name: the package's executable product is also called GridCraft, and xcodebuild
-  # picked either scheme of that name (then built no app).
-  GridCraftApp:
+  # Not "GridCraft": the package's executable product has that name, and xcodebuild picked
+  # either scheme of a shared name (then built no app).
+  GlassCell:
     build:
       targets:
-        GridCraft: all
+        GlassCell: all

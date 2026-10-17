@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds target/mac/GridCraft.app through Xcode (macos/project.yml): the app with its App
+# Builds target/mac/GlassCell.app through Xcode (macos/project.yml): the app with its App
 # Intents metadata and its extensions. Needs XcodeGen (`brew install xcodegen`).
 #
 #   macos/build-xcode.sh               # release; builds the engine first unless SKIP_ENGINE=1
@@ -18,14 +18,14 @@ fi
 echo "== Xcode project"
 (cd "$ROOT/macos" && xcodegen generate --quiet --spec project.yml)
 
-echo "== GridCraft.app ($CONFIG)"
+echo "== GlassCell.app ($CONFIG)"
 # A fresh app every time, so an old one is never copied.
-rm -rf "$OUT/xcode/Build/Products/$CONFIG/GridCraft.app"
-xcodebuild -project "$ROOT/macos/GridCraft.xcodeproj" -scheme GridCraftApp -configuration "$CONFIG" \
+rm -rf "$OUT/xcode/Build/Products/$CONFIG/GlassCell.app"
+xcodebuild -project "$ROOT/macos/GlassCell.xcodeproj" -scheme GlassCell -configuration "$CONFIG" \
     -derivedDataPath "$OUT/xcode" -destination 'platform=macOS' ARCHS="${ARCHS:-arm64 x86_64}" build -quiet
 mkdir -p "$OUT"
-rm -rf "$OUT/GridCraft.app"
-APP="$OUT/xcode/Build/Products/$CONFIG/GridCraft.app"
-[ -x "$APP/Contents/MacOS/GridCraft" ] || { echo "error: xcodebuild made no GridCraft.app" >&2; exit 1; }
-cp -R "$APP" "$OUT/GridCraft.app"
-echo "== done: $OUT/GridCraft.app"
+rm -rf "$OUT/GlassCell.app"
+APP="$OUT/xcode/Build/Products/$CONFIG/GlassCell.app"
+[ -x "$APP/Contents/MacOS/GlassCell" ] || { echo "error: xcodebuild made no GlassCell.app" >&2; exit 1; }
+cp -R "$APP" "$OUT/GlassCell.app"
+echo "== done: $OUT/GlassCell.app"

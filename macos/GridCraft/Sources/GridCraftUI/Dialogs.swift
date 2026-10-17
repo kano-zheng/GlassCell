@@ -487,11 +487,13 @@ struct AboutDialog: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(agents ? "Agent Control" : "GridCraft for Mac").font(.title2.bold())
+            Text(agents ? "Agent Control" : "GlassCell").font(.title2.bold())
             if agents {
-                Text("Every menu item, button and gesture is an engine command, so GridCraft can be driven by scripts and agents (the control channel and MCP; see docs/control-protocol.md and docs/mcp.md).")
+                Text("Every menu item, button and gesture is an engine command, so GlassCell can be driven by scripts and agents (the control channel and MCP; see docs/control-protocol.md and docs/mcp.md).")
             } else {
                 Text("A native Mac spreadsheet on GridCraft's open-source Rust engine.")
+                Text("An independent project, not made or endorsed by the GridCraft or ArtCraft teams.")
+                    .foregroundStyle(.secondary)
                 Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")").foregroundStyle(.secondary)
             }
             HStack {

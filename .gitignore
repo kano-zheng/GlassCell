@@ -13,4 +13,4 @@ plan/
 /macos/GridCraftEngine/Sources/GridCraftEngine/Generated.swift
 /macos/**/.build/
 /macos/**/.swiftpm/
-/macos/GridCraft.xcodeproj/
+/macos/*.xcodeproj/

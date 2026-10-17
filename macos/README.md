@@ -1,4 +1,4 @@
-# GridCraft for Mac
+# GlassCell (the macOS app)
 
 The native macOS frontend (SwiftUI, macOS 26+) over GridCraft's Rust engine. Plan and status:
 [`docs/mac-port.md`](../docs/mac-port.md).
@@ -14,7 +14,7 @@ The native macOS frontend (SwiftUI, macOS 26+) over GridCraft's Rust engine. Pla
   `ReferenceFileDocument` over one engine session), the grid (`GridNSView`, drawn by
   `GridRenderer` from the engine's viewport and geometry) and the window (`WorkbookView`);
   `GridCraft` is the `DocumentGroup` app; `grid-snapshot` renders a grid offscreen and times it.
-- `build-app.sh`: builds `target/mac/GridCraft.app` with SwiftPM (Info.plist with the xlsx/csv/tsv
+- `build-app.sh`: builds `target/mac/GlassCell.app` with SwiftPM (Info.plist with the xlsx/csv/tsv
   document types, ad-hoc signed): quick, but without App Intents metadata or extensions.
 - `project.yml` + `build-xcode.sh`: the full app through Xcode (XcodeGen generates
   `GridCraft.xcodeproj`, not committed): App Intents metadata and the app extensions.
@@ -28,7 +28,7 @@ Needs Xcode 27 (Swift 6) and rustup (the script uses rustup's toolchain and adds
 macos/build-engine.sh                     # after any change to the engine or crates/ffi
 (cd macos/GridCraftEngine && swift test)
 (cd macos/GridCraft && swift test)
-SKIP_ENGINE=1 macos/build-app.sh && open target/mac/GridCraft.app
+SKIP_ENGINE=1 macos/build-app.sh && open target/mac/GlassCell.app
 
 # Look at the grid without a window, and time it (a 100,000-row sheet, 60 scrolling frames):
 (cd macos/GridCraft && swift run -c release grid-snapshot --sample sales out.png)
@@ -48,7 +48,7 @@ this Mac's architecture only.
 Agents and scripts drive the app with the JSON-lines protocol of `docs/control-protocol.md`:
 
 ```sh
-open -n target/mac/GridCraft.app --args --control 7979   # or GRIDCRAFT_CONTROL_PORT=7979
+open -n target/mac/GlassCell.app --args --control 7979   # or GRIDCRAFT_CONTROL_PORT=7979
 printf '%s\n' '{"id":1,"method":"app.open","params":{"path":"/tmp/book.xlsx"}}' \
   '{"id":2,"method":"cell.get","params":{"cell":"B3"}}' | nc 127.0.0.1 7979
 ```

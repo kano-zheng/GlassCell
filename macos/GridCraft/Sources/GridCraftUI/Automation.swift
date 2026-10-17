@@ -11,7 +11,7 @@ public enum Automation {
 
         public var errorDescription: String? {
             switch self {
-            case .noWorkbook: "Open a workbook in GridCraft first."
+            case .noWorkbook: "Open a workbook in GlassCell first."
             case let .engine(message): message
             }
         }

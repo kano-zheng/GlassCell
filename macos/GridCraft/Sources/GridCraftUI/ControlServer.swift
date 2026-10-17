@@ -23,7 +23,7 @@ public final class ControlServer: Sendable {
         }
         listener.stateUpdateHandler = { state in
             if case let .failed(error) = state {
-                FileHandle.standardError.write(Data("GridCraft control channel: \(error)\n".utf8))
+                FileHandle.standardError.write(Data("GlassCell control channel: \(error)\n".utf8))
             }
         }
         listener.start(queue: queue)
@@ -58,9 +58,9 @@ public final class ControlServer: Sendable {
         guard running == nil, let port = requestedPort() else { return }
         do {
             running = try ControlServer(port: port)
-            FileHandle.standardError.write(Data("GridCraft control channel on 127.0.0.1:\(port)\n".utf8))
+            FileHandle.standardError.write(Data("GlassCell control channel on 127.0.0.1:\(port)\n".utf8))
         } catch {
-            FileHandle.standardError.write(Data("GridCraft control channel: \(error.localizedDescription)\n".utf8))
+            FileHandle.standardError.write(Data("GlassCell control channel: \(error.localizedDescription)\n".utf8))
         }
     }
 }

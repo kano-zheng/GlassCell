@@ -116,7 +116,7 @@ public struct WorkbookView: View {
         // Spotlight indexes the workbook when it opens or gets a new file, and as it closes.
         .task(id: fileURL) { WorkbookSpotlight.index(document, fileURL: fileURL) }
         .onDisappear { WorkbookSpotlight.index(document, fileURL: fileURL) }
-        .alert("GridCraft", isPresented: Binding(get: { document.problem != nil }, set: { if !$0 { document.problem = nil } })) {
+        .alert("GlassCell", isPresented: Binding(get: { document.problem != nil }, set: { if !$0 { document.problem = nil } })) {
             Button("OK") { document.problem = nil }
         } message: {
             Text(document.problem ?? "")
@@ -142,7 +142,7 @@ extension SpreadsheetDocument {
                 let values = JSON.decode(params)
                 Task { @MainActor in insertPicture(self, params: values) }
             } else {
-                problem = "The “\(name)” dialog isn't in GridCraft for Mac yet."
+                problem = "The “\(name)” dialog isn't in GlassCell yet."
             }
         case let .message(text):
             problem = text
