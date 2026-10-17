@@ -43,7 +43,15 @@ jobs:
       - name: Engine (Apple silicon and Intel)
         run: macos/build-engine.sh
       - name: Tests
-        run: cd macos/GridCraft && swift test
+        run: |
+          cd macos/GridCraft
+          set -o pipefail
+          if ! swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log"; then
+            # Failing tests and compile errors as annotations, on the run's summary page.
+            grep -E "✘|error:|Expectation failed|Fatal error" "$RUNNER_TEMP/swift-test.log" | head -40 |
+              while IFS= read -r line; do echo "::error title=swift test::$line"; done
+            exit 1
+          fi
       - name: GlassCell.app
         run: MARKETING_VERSION="$VERSION" BUILD_NUMBER="${{ github.run_number }}" SKIP_ENGINE=1 macos/build-xcode.sh
       - name: Package
