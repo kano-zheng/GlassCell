@@ -52,7 +52,8 @@ private struct MixedToggle: View {
     let set: @MainActor @Sendable (Bool) -> Void
 
     var body: some View {
-        Toggle(isOn: Binding(get: { value == true }, set: set)) { Text(title) }
+        // A closure, not `set` itself: converting the isolated function crashed Swift 6.3's IRGen.
+        Toggle(isOn: Binding(get: { value == true }, set: { set($0) })) { Text(title) }
             .toggleStyle(.checkbox)
             .overlay(alignment: .leading) {
                 if value == nil {
