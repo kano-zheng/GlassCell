@@ -291,6 +291,17 @@ impl Engine {
         })
     }
 
+    /// How many digits the row headers are sized for, with `last_shown` the last row in view:
+    /// enough for every row the scroll bar reaches too, so their width holds while scrolling.
+    pub fn row_number_digits(&self, last_shown: u32) -> Result<u32, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            let sh = d.wb.active().ok_or_else(|| engine_error("no sheet"))?;
+            Ok(gridcraft_engine::geometry::row_number_digits(sh, row_of(last_shown)))
+        })
+    }
+
     /// The status bar's Sum / Count / Average for the selection (none for a single cell).
     pub fn status_items(&self) -> Result<Vec<StatusItem>, FfiError> {
         guard(|| {

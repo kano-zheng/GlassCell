@@ -82,4 +82,15 @@ import Testing
         #expect(state.extentX >= 120 && state.extentY >= 300)
         #expect(state.cellsTop > 0)
     }
+
+    @Test func rowHeadersKeepTheirWidthPastRow100() throws {
+        let document = SpreadsheetDocument(sample: "sales")
+        let renderer = GridRenderer(engine: document.engine, measurer: CoreTextMeasurer())
+        let size = CGSize(width: 800, height: 600)
+        let top = try renderer.layout(size: size, scroll: .zero)
+        // Scrolled so rows in the nineties and past 100 are in view.
+        let past = try renderer.layout(size: size, scroll: CGPoint(x: 0, y: 95 * 20))
+        #expect(past.geometry.rowAt(y: Float(size.height)) >= 100)
+        #expect(top.headerWidth == past.headerWidth)
+    }
 }

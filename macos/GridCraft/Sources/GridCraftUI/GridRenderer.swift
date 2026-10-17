@@ -52,9 +52,10 @@ public struct GridRenderer {
             headerWidth = fixed
             geometry = try engine.geometry(origin: point(headerWidth, headerHeight), size: gridSize(size, headerWidth, headerHeight), scroll: point(scroll.x, scroll.y), scale: scale)
         } else if sheet.showHeadings {
-            // The row headers are as wide as the bottom row's number needs.
-            let lastRow = geometry.rowAt(y: Float(size.height)) + 1
-            let digits = max(2, String(lastRow).count)
+            // The row headers are as wide as the bottom row's number needs, and every row the
+            // scroll bar reaches: their width holds while scrolling (the engine's rule).
+            let lastRow = geometry.rowAt(y: Float(size.height))
+            let digits = Int((try? engine.rowNumberDigits(lastShown: lastRow)) ?? 2)
             let width = ((CGFloat(digits) * 7 + 14) * chrome).rounded()
             if width != headerWidth {
                 headerWidth = width

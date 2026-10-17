@@ -468,6 +468,14 @@ impl Geometry {
 /// Where a fill-handle drag of `source` to the cell under the pointer fills: the source
 /// extended along the axis the pointer moved further out on (the source itself while the
 /// pointer is inside it).
+/// How many digits the row headers are sized for, with `last_shown` (0-based) the last row in
+/// view: enough for every row a scroll bar reaches too, so the headers keep their width while
+/// the sheet scrolls (they used to widen at row 100 and shift every cell); at least two.
+pub fn row_number_digits(sh: &Sheet, last_shown: u32) -> u32 {
+    let last = scroll_span(sh).0.max(last_shown).saturating_add(1);
+    last.checked_ilog10().map_or(1, |d| d + 1).max(2)
+}
+
 /// The last row and column a scroll bar reaches: ten past the used range, and at least row 100
 /// and column Z.
 pub fn scroll_span(sh: &Sheet) -> (u32, u32) {
@@ -669,5 +677,19 @@ mod tests {
         // Scrolled past it, the bar reaches where the view is.
         let far = Geometry::new(&sh, (0.0, 0.0), (100.0, 100.0), (1.0e6, 0.0), 1.0);
         assert_eq!(far.scroll_extent(&sh).0, 1.0e6);
+    }
+
+    #[test]
+    fn row_headers_keep_their_width_while_scrolling() {
+        let mut sh = Sheet::new("S");
+        // The scroll bar reaches row 101 at least: three digits from the top of the sheet on.
+        assert_eq!(row_number_digits(&sh, 30), 3);
+        assert_eq!(row_number_digits(&sh, 99), 3);
+        assert_eq!(row_number_digits(&sh, 120), 3);
+        // Scrolled far past it, or data that far down, widens them.
+        assert_eq!(row_number_digits(&sh, 1_200), 4);
+        sh.set_value(CellRef::new(5_000, 0), gridcraft_core::Value::Number(1.0));
+        assert_eq!(row_number_digits(&sh, 30), 4);
+        assert_eq!(row_number_digits(&sh, MAX_ROWS - 1), 7);
     }
 }
