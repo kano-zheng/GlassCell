@@ -21,7 +21,7 @@ This repository is a **fork** of [GridCraft](https://github.com/storytold/gridcr
 - **SF Symbols are allowed in the Mac frontend, only through the system API** (`Image(systemName:)`, `Label(_:systemImage:)`). Never export, trace or commit symbol artwork as files, and never use symbols to imitate Office's look. Where no fitting symbol exists, draw the icon in code (port it from `crates/ui-egui/src/icons.rs`).
 - Never copy Office's icons, ribbon artwork, theme XML, table-style definitions, templates, clip art or wording beyond feature names. Excel feature *names* (menu labels, function names) are fine.
 - Screenshots of Microsoft software are never committed.
-- The ArtCraft brand files in `docs/brand/` are ArtCraft trademarks under `docs/brand/LICENSE-brand.txt`. Before distributing the fork, replace them with the fork's own branding.
+- The ArtCraft marks (name, wordmark, logos) are ArtCraft trademarks and not open source. This fork is published as a modified version, so it carries none of them: `docs/brand/` was removed, and upstream merges must not bring it back. Plain text may say the work is based on GridCraft by the ArtCraft team; nothing may present the fork as an ArtCraft product.
 
 ## Never crash
 People trust GridCraft with their numbers; a crash loses their work. **This outranks feature work**, in Rust and in Swift.
