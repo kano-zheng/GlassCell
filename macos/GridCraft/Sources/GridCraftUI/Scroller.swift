@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Where the grid is scrolled across, for the scroller (sheet units past the frozen columns).
@@ -40,36 +41,38 @@ struct HorizontalScroller: View {
             let travel = max(0, track - knob)
             let offset = extent > 0 ? travel * min(max(state.x / extent, 0), 1) : 0
             ZStack(alignment: .leading) {
-                // Not quite clear: inside the glass a clear view takes no clicks.
-                Rectangle().fill(.white.opacity(0.001))
+                Color.clear
                 Capsule()
                     .fill(.secondary.opacity(hovering || dragStart != nil ? 0.7 : 0.45))
                     .frame(width: knob, height: hovering || dragStart != nil ? 9 : 7)
                     .offset(x: Self.inset + offset)
             }
-            .contentShape(.rect)
-            // One gesture for the whole track: a press on the knob drags it; a click beside it
+            // The mouse in AppKit: once pressed, the scroller gets every drag until the release,
+            // wherever the pointer goes (a SwiftUI gesture inside the glass lost the drag when
+            // the pointer left the capsule). A press on the knob drags it; a click beside it
             // scrolls a screenful that way.
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { drag in
-                        let onKnob = (Self.inset + offset - 6...Self.inset + offset + knob + 6).contains(drag.startLocation.x)
-                        guard onKnob else { return }
-                        let start = dragStart ?? (state.x, state.extent)
-                        dragStart = start
-                        guard travel > 0 else { return }
-                        scroll(max(0, start.x + drag.translation.width / travel * start.extent))
-                    }
-                    .onEnded { drag in
+            .overlay {
+                ScrollerMouse(
+                    down: { x in
+                        if (Self.inset + offset - 6...Self.inset + offset + knob + 6).contains(x) {
+                            dragStart = (state.x, state.extent)
+                        }
+                    },
+                    drag: { moved in
+                        guard let start = dragStart, travel > 0 else { return }
+                        scroll(max(0, start.x + moved / travel * start.extent))
+                    },
+                    up: { x, moved in
                         defer { dragStart = nil }
-                        guard dragStart == nil, abs(drag.translation.width) < 4 else { return }
-                        if drag.location.x < Self.inset + offset {
+                        guard dragStart == nil, abs(moved) < 4 else { return }
+                        if x < Self.inset + offset {
                             scroll(max(0, state.x - state.visible))
-                        } else if drag.location.x > Self.inset + offset + knob {
+                        } else if x > Self.inset + offset + knob {
                             scroll(state.x + state.visible)
                         }
                     }
-            )
+                )
+            }
             .frame(maxHeight: .infinity)
         }
         .frame(height: 28)
@@ -86,5 +89,60 @@ struct HorizontalScroller: View {
             @unknown default: break
             }
         }
+    }
+}
+
+/// The scroller's mouse handling: AppKit sends a view that took the mouse down every drag and
+/// the release, even with the pointer outside it.
+struct ScrollerMouse: NSViewRepresentable {
+    /// Pressed at `x` (points from the scroller's left).
+    let down: (CGFloat) -> Void
+    /// Dragged `moved` points across since the press.
+    let drag: (CGFloat) -> Void
+    /// Released at `x`, `moved` points across from the press.
+    let up: (CGFloat, CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ScrollerMouseView {
+        ScrollerMouseView(frame: .zero)
+    }
+
+    func updateNSView(_ view: ScrollerMouseView, context: Context) {
+        view.down = down
+        view.drag = drag
+        view.up = up
+    }
+}
+
+final class ScrollerMouseView: NSView {
+    var down: ((CGFloat) -> Void)?
+    var drag: ((CGFloat) -> Void)?
+    var up: ((CGFloat, CGFloat) -> Void)?
+    private var pressedAt: CGFloat?
+
+    override var isFlipped: Bool { true }
+
+    /// A click on the scroller of a window in the background scrolls it too.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    private func x(_ event: NSEvent) -> CGFloat {
+        convert(event.locationInWindow, from: nil).x
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let at = x(event)
+        pressedAt = at
+        down?(at)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let pressedAt else { return }
+        drag?(x(event) - pressedAt)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let pressedAt else { return }
+        let at = x(event)
+        self.pressedAt = nil
+        up?(at, at - pressedAt)
     }
 }
