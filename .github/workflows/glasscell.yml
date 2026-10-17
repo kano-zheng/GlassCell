@@ -1,0 +1,37 @@
+# GlassCell's checks: the engine and its Swift bindings, the app's tests, and the full Xcode build
+# (App Intents, Quick Look). The engine's own checks are in ci.yml, which upstream keeps.
+name: GlassCell
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: glasscell-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode (the newest on the runner)
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+      - name: Tools
+        run: |
+          brew install xcodegen
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Engine
+        run: ARCHS=arm64 macos/build-engine.sh
+      - name: Tests
+        run: cd macos/GridCraft && swift test
+      - name: GlassCell.app
+        run: ARCHS=arm64 SKIP_ENGINE=1 macos/build-xcode.sh

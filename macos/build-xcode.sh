@@ -5,6 +5,7 @@
 #   macos/build-xcode.sh               # release; builds the engine first unless SKIP_ENGINE=1
 #   CONFIG=Debug macos/build-xcode.sh
 #   ARCHS=arm64 macos/build-xcode.sh  # this Mac's architecture only (as the engine was built)
+#   MARKETING_VERSION=0.1.0 BUILD_NUMBER=42 macos/build-xcode.sh  # a release's version
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,8 +22,12 @@ echo "== Xcode project"
 echo "== GlassCell.app ($CONFIG)"
 # A fresh app every time, so an old one is never copied.
 rm -rf "$OUT/xcode/Build/Products/$CONFIG/GlassCell.app"
+VERSION_ARGS=()
+[ -n "${MARKETING_VERSION:-}" ] && VERSION_ARGS+=("MARKETING_VERSION=$MARKETING_VERSION")
+[ -n "${BUILD_NUMBER:-}" ] && VERSION_ARGS+=("CURRENT_PROJECT_VERSION=$BUILD_NUMBER")
 xcodebuild -project "$ROOT/macos/GlassCell.xcodeproj" -scheme GlassCell -configuration "$CONFIG" \
-    -derivedDataPath "$OUT/xcode" -destination 'platform=macOS' ARCHS="${ARCHS:-arm64 x86_64}" build -quiet
+    -derivedDataPath "$OUT/xcode" -destination 'platform=macOS' ARCHS="${ARCHS:-arm64 x86_64}" \
+    ${VERSION_ARGS[@]+"${VERSION_ARGS[@]}"} build -quiet
 mkdir -p "$OUT"
 rm -rf "$OUT/GlassCell.app"
 APP="$OUT/xcode/Build/Products/$CONFIG/GlassCell.app"

@@ -38,6 +38,22 @@ SKIP_ENGINE=1 macos/build-app.sh && open target/mac/GlassCell.app
 `PROFILE=dev` builds the engine unoptimised (faster to build, slow to run); `ARCHS=arm64` builds
 this Mac's architecture only.
 
+## CI and releases
+
+- `.github/workflows/glasscell.yml` runs on every push to `main` and every pull request: the
+  engine and its bindings, `swift test`, and the full Xcode build, on a macOS 26 runner with
+  the newest Xcode it has. (`ci.yml` keeps running upstream's engine checks.)
+- A release is a tag: `git tag v0.1.0 && git push origin v0.1.0`.
+  `.github/workflows/glasscell-release.yml` builds GlassCell.app for Apple silicon and Intel
+  with that version (`MARKETING_VERSION`, build number = the run number), packs
+  `GlassCell-0.1.0.dmg` and `.zip` with their SHA-256 sums, and publishes them as the GitHub
+  Release of the tag. It can also be run by hand for an existing tag.
+- Builds are signed ad hoc, not notarized (that needs a Developer ID): on first launch, users
+  choose Open Anyway in System Settings › Privacy & Security.
+- Upstream's `release.yml`, `freebsd.yml` and `windows-arm64.yml` release GridCraft's own app
+  from a `release` branch with upstream's secrets; GlassCell has no such branch, so they don't
+  run. Disable them in the repository's Actions settings to keep them out of the way.
+
 ## Localization
 
 `GridCraft/Resources/Localizable.xcstrings` is generated from egui's translation tables:
