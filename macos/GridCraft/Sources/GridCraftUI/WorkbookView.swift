@@ -2,13 +2,14 @@ import AppKit
 import GridCraftEngine
 import SwiftUI
 
-/// A workbook window: the grid, with the sheet tabs below and the zoom in the toolbar.
+/// A workbook window: the formula bar, and the grid with the status bar floating over its bottom.
 public struct WorkbookView: View {
     @ObservedObject var document: SpreadsheetDocument
     /// Where the workbook is saved (`nil` until it is): sharing names it, Spotlight indexes it.
     let fileURL: URL?
     @Environment(\.undoManager) private var undoManager
-    @State private var frameTime: Double = 0
+    /// How much of the grid's bottom the status bar covers.
+    @State private var statusBarHeight: CGFloat = 0
     @State private var editor: EditController
 
     public init(document: SpreadsheetDocument, fileURL: URL? = nil) {
@@ -26,38 +27,12 @@ public struct WorkbookView: View {
         VStack(spacing: 0) {
             FormulaBar(document: document, editor: editor)
             Divider()
-            GridView(document: document, editor: editor) { ms in
-                frameTime = ms
-            }
-            Divider()
-            HStack(spacing: 4) {
-                if let sheet {
-                    ForEach(Array(sheet.sheetNames.enumerated()), id: \.offset) { index, name in
-                        Button(name) {
-                            document.run("sheet.activate", ["sheet": index])
-                        }
-                        .buttonStyle(.accessoryBar)
-                        .fontWeight(index == Int(sheet.index) ? .semibold : .regular)
-                    }
+            // The grid runs to the window's bottom edge, under the floating status bar.
+            GridView(document: document, editor: editor, bottomInset: statusBarHeight)
+                .overlay(alignment: .bottom) {
+                    WorkbookStatusBar(document: document)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
                 }
-                Spacer()
-                if let notice = document.notice {
-                    Text(notice)
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .task(id: notice) {
-                            try? await Task.sleep(for: .seconds(6))
-                            document.notice = nil
-                        }
-                }
-                Text(String(format: "%.1f ms", frameTime))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
         }
         .inspector(isPresented: $document.showInspector) {
             InspectorView(document: document, editor: editor)

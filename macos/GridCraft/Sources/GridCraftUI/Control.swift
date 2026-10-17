@@ -393,6 +393,8 @@ enum Control {
 
     /// The view a press went to: drags and the release go to it too, as AppKit does.
     private static var mouseTarget: NSView?
+    /// The pressed button is a SwiftUI control, which the window delivers to.
+    private static var mouseThroughWindow = false
 
     private static func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, _ p: [String: Any], clicks: Int = 1) throws -> NSEvent {
         let window = try window()
@@ -410,21 +412,32 @@ enum Control {
         return view
     }
 
-    /// Delivers a mouse event straight to its view, so it acts even when GridCraft isn't the
-    /// active app (a first click on an inactive window would only bring it forward).
+    /// Delivers a mouse event straight to the grid, so it acts even when GridCraft isn't the
+    /// active app (a first click on an inactive window would only bring it forward). SwiftUI's
+    /// controls (the status bar's tabs and buttons) track the mouse through the window, so
+    /// their events go there.
     private static func mouse(_ type: NSEvent.EventType, at point: NSPoint, _ p: [String: Any], clicks: Int = 1) throws {
         let event = try mouseEvent(type, at: point, p, clicks: clicks)
         switch type {
         case .leftMouseDown:
             let target = try view(at: point)
+            guard target.firstAncestor(of: GridNSView.self) != nil || target is NSTextView else {
+                mouseTarget = nil
+                mouseThroughWindow = true
+                try window().sendEvent(event)
+                return
+            }
             mouseTarget = target
             target.window?.makeFirstResponder(target.acceptsFirstResponder ? target : target.window?.firstResponder)
             target.mouseDown(with: event)
         case .leftMouseDragged:
+            if mouseThroughWindow { try window().sendEvent(event) }
             mouseTarget?.mouseDragged(with: event)
         case .leftMouseUp:
+            if mouseThroughWindow { try window().sendEvent(event) }
             mouseTarget?.mouseUp(with: event)
             mouseTarget = nil
+            mouseThroughWindow = false
         default:
             try view(at: point).mouseMoved(with: event)
         }

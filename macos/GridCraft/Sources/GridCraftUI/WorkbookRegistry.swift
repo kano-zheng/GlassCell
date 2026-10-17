@@ -63,4 +63,9 @@ extension NSView {
         }
         return nil
     }
+
+    /// This view or the nearest view of type `T` it is inside.
+    func firstAncestor<T: NSView>(of type: T.Type) -> T? {
+        sequence(first: self, next: \.superview).lazy.compactMap { $0 as? T }.first
+    }
 }

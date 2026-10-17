@@ -188,3 +188,22 @@ fn the_search_summary_lists_labels_and_capped_text() {
     assert!(short.text.chars().count() <= 40);
     assert!(e.search_summary(0).unwrap().text.is_empty());
 }
+
+#[test]
+fn the_status_bar_sums_a_selection_in_its_format() {
+    let e = engine();
+    e.execute("file.new".into(), r#"{"sample": "sales"}"#.into()).unwrap();
+    e.execute("selection.set".into(), r#"{"range": "C5"}"#.into()).unwrap();
+    assert!(e.status_items().unwrap().is_empty());
+    e.execute("selection.set".into(), r#"{"range": "B5:D6"}"#.into()).unwrap();
+    let items = e.status_items().unwrap();
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, ["Sum", "Count", "Average"]);
+    // The active cell B5 is a label: General shows grouped digits.
+    assert_eq!(items[0].value, "176,670");
+    assert_eq!(items[1].value, "6");
+    e.execute("selection.set".into(), r#"{"range": "C5:D6"}"#.into()).unwrap();
+    let items = e.status_items().unwrap();
+    assert_eq!(items[0].value, "$176,670");
+    assert_eq!(items[1].value, "4");
+}

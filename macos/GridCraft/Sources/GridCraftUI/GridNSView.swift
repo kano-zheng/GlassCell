@@ -14,6 +14,9 @@ public final class GridNSView: NSView {
     /// The last frame's drawing time, in milliseconds.
     public private(set) var lastFrameMilliseconds: Double = 0
     public var onFrame: ((Double) -> Void)?
+    /// Points at the bottom covered by the window's floating status bar: revealing a cell keeps
+    /// it above them.
+    public var bottomInset: CGFloat = 0
     /// The cell edit shared with the formula bar.
     public var editor: EditController? {
         didSet {
@@ -676,7 +679,13 @@ public final class GridNSView: NSView {
 
     /// Scrolls the active cell into view.
     public func reveal() {
-        guard let document, let layout = layoutCache, let active = try? document.engine.selection().active else { return }
+        guard let document, var layout = layoutCache, let active = try? document.engine.selection().active else { return }
+        if bottomInset > 0, bounds.height > bottomInset * 2,
+            let uncovered = try? GridRenderer(engine: document.engine, measurer: measurer)
+                .layout(size: CGSize(width: bounds.width, height: bounds.height - bottomInset), scroll: scroll)
+        {
+            layout = uncovered
+        }
         let target = layout.geometry.reveal(cell: active)
         scroll(to: CGPoint(x: CGFloat(target.x), y: CGFloat(target.y)))
     }
@@ -878,11 +887,13 @@ extension GridNSView: NSMenuItemValidation {
 public struct GridView: NSViewRepresentable {
     @ObservedObject var document: SpreadsheetDocument
     let editor: EditController
+    var bottomInset: CGFloat = 0
     var onFrame: ((Double) -> Void)?
 
-    public init(document: SpreadsheetDocument, editor: EditController, onFrame: ((Double) -> Void)? = nil) {
+    public init(document: SpreadsheetDocument, editor: EditController, bottomInset: CGFloat = 0, onFrame: ((Double) -> Void)? = nil) {
         self.document = document
         self.editor = editor
+        self.bottomInset = bottomInset
         self.onFrame = onFrame
     }
 
@@ -891,6 +902,7 @@ public struct GridView: NSViewRepresentable {
         view.document = document
         view.editor = editor
         view.onFrame = onFrame
+        view.bottomInset = bottomInset
         return view
     }
 
@@ -898,6 +910,7 @@ public struct GridView: NSViewRepresentable {
         _ = document.generation
         view.document = document
         view.onFrame = onFrame
+        view.bottomInset = bottomInset
         view.needsDisplay = true
     }
 }

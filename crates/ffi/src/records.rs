@@ -637,6 +637,13 @@ pub struct SelectionState {
     pub ranges: Vec<CellRange>,
 }
 
+/// One status-bar statistic: `Sum`, `Count` or `Average`, and its value as displayed.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct StatusItem {
+    pub label: String,
+    pub value: String,
+}
+
 /// What Spotlight indexes for a workbook: its sheet, table and name labels, and its cells'
 /// displayed text (capped).
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]

@@ -194,3 +194,27 @@ pub fn stats(sheet: &Sheet, ranges: &[RangeRef]) -> Stats {
     }
     s
 }
+
+/// What the status bar shows for a selection of more than one cell: `("Sum", …)`, `("Count", …)`
+/// and `("Average", …)`, each there only when it applies. Sums and averages take the active
+/// cell's number format (General shows grouped digits).
+pub fn status_items(wb: &Workbook, sheet: &Sheet, selection: &crate::selection::Selection) -> Vec<(&'static str, String)> {
+    if selection.is_single_cell() {
+        return Vec::new();
+    }
+    let st = stats(sheet, &selection.ranges);
+    let code = wb.styles.get(sheet.style_id(selection.active)).num_fmt.as_str();
+    let code = if code == "General" { "#,##0.##########" } else { code };
+    let fmt = |v: f64| format(&Value::Number(v), code, wb).text.trim_end_matches('.').to_string();
+    let mut items = Vec::new();
+    if st.numeric > 0 {
+        items.push(("Sum", fmt(st.sum)));
+    }
+    if st.count > 0 {
+        items.push(("Count", st.count.to_string()));
+    }
+    if let Some(a) = st.average {
+        items.push(("Average", fmt(a)));
+    }
+    items
+}

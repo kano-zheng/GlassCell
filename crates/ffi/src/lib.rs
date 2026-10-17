@@ -278,6 +278,17 @@ impl Engine {
         })
     }
 
+    /// The status bar's Sum / Count / Average for the selection (none for a single cell).
+    pub fn status_items(&self) -> Result<Vec<StatusItem>, FfiError> {
+        guard(|| {
+            let s = self.session();
+            let d = s.active().ok_or_else(|| engine_error("no workbook open"))?;
+            let Some(sh) = d.wb.active() else { return Ok(Vec::new()) };
+            let items = gridcraft_engine::display::status_items(&d.wb, sh, &d.selection);
+            Ok(items.into_iter().map(|(label, value)| StatusItem { label: label.to_string(), value }).collect())
+        })
+    }
+
     /// The workbook for Spotlight: labels, and up to `max_chars` characters of cell text.
     pub fn search_summary(&self, max_chars: u32) -> Result<SearchSummary, FfiError> {
         guard(|| {

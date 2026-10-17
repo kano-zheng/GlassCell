@@ -306,27 +306,10 @@ pub fn status_bar(app: &mut SheetApp, ui: &mut Ui) {
                     // Average / Count / Sum.
                     if let Some(d) = app.session.active()
                         && let Some(sh) = d.wb.active()
-                        && !d.selection.is_single_cell()
                     {
-                        let st = gridcraft_engine::display::stats(sh, &d.selection.ranges);
-                        let fmt = |v: f64| {
-                            let code = d.wb.styles.get(sh.style_id(d.selection.active)).num_fmt.as_str().to_string();
-                            let code = if code == "General" { "#,##0.##########".to_string() } else { code };
-                            gridcraft_engine::display::format(&gridcraft_engine::core::Value::Number(v), &code, &d.wb)
-                                .text
-                                .trim_end_matches('.')
-                                .to_string()
-                        };
-                        let mut parts = Vec::new();
-                        if st.numeric > 0 {
-                            parts.push(format!("Sum: {}", fmt(st.sum)));
-                        }
-                        if st.count > 0 {
-                            parts.push(format!("Count: {}", st.count));
-                        }
-                        if let Some(a) = st.average {
-                            parts.push(format!("Average: {}", fmt(a)));
-                        }
+                        let parts = gridcraft_engine::display::status_items(&d.wb, sh, &d.selection)
+                            .into_iter()
+                            .map(|(label, value)| format!("{label}: {value}"));
                         for p in parts {
                             ui.label(egui::RichText::new(p).font(theme::ui_font(12.5)).color(t.text_dim));
                             ui.add_space(10.0);
