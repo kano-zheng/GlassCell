@@ -34,6 +34,20 @@ public struct WorkbookView: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
                 }
         }
+        .overlay(alignment: .top) {
+            if document.showPalette {
+                ZStack(alignment: .top) {
+                    // A click beside the palette closes it.
+                    Color.clear
+                        .contentShape(.rect)
+                        .onTapGesture { document.showPalette = false }
+                    CommandPalette(document: document, editor: editor)
+                        .padding(.top, 40)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
+        }
+        .animation(.smooth(duration: 0.2), value: document.showPalette)
         .inspector(isPresented: $document.showInspector) {
             InspectorView(document: document, editor: editor)
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
@@ -47,9 +61,6 @@ public struct WorkbookView: View {
         }
         .sheet(item: $document.form) { presented in
             FormSheet(form: presented.session, document: document)
-        }
-        .sheet(isPresented: $document.showPalette) {
-            CommandPalette(document: document, editor: editor)
         }
         .onChange(of: document.requests) { _, requests in
             guard !requests.isEmpty else { return }
