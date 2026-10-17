@@ -56,7 +56,18 @@ struct WorkbookToolbar: CustomizableToolbarContent {
         .customizationBehavior(.disabled)
     }
 
+    // In groups of at most ten: the macOS 26 SDK's toolbar builder takes no more per block.
     var body: some CustomizableToolbarContent {
+        editing
+        textStyle
+        cellFormat
+        dataAndFunctions
+        viewItems
+    }
+
+    /// The document's name, Undo and Redo, and the font.
+    @ToolbarContentBuilder
+    private var editing: some CustomizableToolbarContent {
         // The document's name, a capsule by itself (the system title is removed).
         ToolbarItem(id: "document", placement: .navigation) {
             // In a container, so the toolbar keeps it a view (a bare Menu shows its icon only).
@@ -89,6 +100,11 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             }
             .help("Font Size")
         }
+    }
+
+    /// Bold, Italic, Underline and the colours.
+    @ToolbarContentBuilder
+    private var textStyle: some CustomizableToolbarContent {
         divider("fontStyleGroup")
         ToolbarItem(id: "bold") {
             toggle("home.bold", "Bold", "bold", isOn: format?.active.bold)
@@ -105,6 +121,11 @@ struct WorkbookToolbar: CustomizableToolbarContent {
         ToolbarItem(id: "fill") {
             ColorMenu(title: "Fill Color", symbol: "drop.halffull", automatic: "No Fill") { hex in run("home.fillColor", ["color": hex ?? "none"]) }
         }
+    }
+
+    /// Alignment, wrapping, merging, borders and the number format.
+    @ToolbarContentBuilder
+    private var cellFormat: some CustomizableToolbarContent {
         divider("alignmentGroup")
         ToolbarItem(id: "alignLeft") {
             align("home.alignLeft", "Align Left", "text.alignleft", .left)
@@ -152,6 +173,11 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             .help("Number Format")
             .menuIndicator(.hidden)
         }
+    }
+
+    /// Sort & Filter and Insert, then AutoSum as a capsule of its own.
+    @ToolbarContentBuilder
+    private var dataAndFunctions: some CustomizableToolbarContent {
         divider("dataGroup")
         ToolbarItem(id: "sortFilter") {
             Menu {
@@ -206,6 +232,11 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             .menuIndicator(.hidden)
             .help("AutoSum Functions")
         }
+    }
+
+    /// Zoom and Share, and the inspector.
+    @ToolbarContentBuilder
+    private var viewItems: some CustomizableToolbarContent {
         ToolbarSpacer(.flexible)
         ToolbarItem(id: "zoom") {
             let levels = Array(Set([50, 75, 100, 125, 150, 200, Int(zoom)])).sorted()
