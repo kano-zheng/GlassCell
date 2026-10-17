@@ -62,4 +62,23 @@ import Testing
         #expect(grid.scroll.x > 0)
         #expect(cell.maxX <= grid.bounds.width - 310)
     }
+
+    @Test func theGridTellsTheScrollerWhereItIs() async throws {
+        let document = SpreadsheetDocument(sample: "sales")
+        let grid = GridNSView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        let state = GridScrollState()
+        grid.document = document
+        grid.scrollState = state
+        let rep = try #require(grid.bitmapImageRepForCachingDisplay(in: grid.bounds))
+        // The first pass opens the sheet where its file left it; then scroll.
+        grid.cacheDisplay(in: grid.bounds, to: rep)
+        grid.scroll(to: CGPoint(x: 120, y: 0))
+        grid.cacheDisplay(in: grid.bounds, to: rep)
+        // It reports after the display pass.
+        for _ in 0..<10 where state.x != 120 { await Task.yield() }
+        #expect(state.x == 120)
+        #expect(state.visible > 0)
+        // An empty sheet past column I still scrolls on to column Z, or to where the view is.
+        #expect(state.extent >= 120)
+    }
 }

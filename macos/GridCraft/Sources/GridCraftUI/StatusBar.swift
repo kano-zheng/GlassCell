@@ -2,9 +2,13 @@ import GridCraftEngine
 import SwiftUI
 
 /// The bottom of a workbook window, floating over the grid in Liquid Glass: the sheet tabs with
-/// a button that adds one, a passing notice, and the selection's Sum / Count / Average.
+/// a button that adds one, the horizontal scroller, a passing notice, and the selection's
+/// Sum / Count / Average.
 struct WorkbookStatusBar: View {
     @ObservedObject var document: SpreadsheetDocument
+    let scrollState: GridScrollState
+    /// Scrolls the grid across to an offset.
+    let scrollTo: (CGFloat) -> Void
     @Namespace private var tabs
 
     private var sheet: SheetInfo? {
@@ -33,7 +37,12 @@ struct WorkbookStatusBar: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .help("Insert Sheet")
                 }
-                Spacer(minLength: 8)
+                if scrollState.extent > 0 {
+                    HorizontalScroller(state: scrollState, scroll: scrollTo)
+                        .frame(minWidth: 80, maxWidth: .infinity)
+                } else {
+                    Spacer(minLength: 8)
+                }
                 if let notice = document.notice {
                     Text(notice)
                         .lineLimit(1)

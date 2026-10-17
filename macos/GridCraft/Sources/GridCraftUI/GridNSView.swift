@@ -20,6 +20,8 @@ public final class GridNSView: NSView {
     public var bottomInset: CGFloat = 0
     /// Points at the right covered by the floating inspector: revealing a cell keeps it left of them.
     public var trailingInset: CGFloat = 0
+    /// Where the grid is scrolled across, for the scroller.
+    public var scrollState: GridScrollState?
     /// Points at the top covered by the window's toolbar and formula bar. The grid starts below
     /// them; above, the rows scrolled past go on under frosted glass, the column headers on it.
     /// This view's coordinates start where the grid does (its bounds begin at `-topInset`).
@@ -75,6 +77,18 @@ public final class GridNSView: NSView {
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         setBoundsOrigin(NSPoint(x: 0, y: -topInset))
+    }
+
+    /// Tells the scroller where the grid is, after this display pass (SwiftUI state must not
+    /// change while AppKit draws).
+    private func publishScroll(_ layout: GridRenderer.Layout) {
+        guard let state = scrollState else { return }
+        let extent = CGFloat(layout.geometry.scrollExtent().x)
+        let shown = bounds.width - layout.headerWidth - CGFloat(layout.geometry.frozenSize().width) - trailingInset
+        let visible = max(0, shown / max(CGFloat(layout.scale), 0.01))
+        let x = scroll.x
+        guard state.x != x || state.extent != extent || state.visible != visible else { return }
+        Task { @MainActor in state.update(x: x, extent: extent, visible: visible) }
     }
 
     /// Blurs the rows under the window's chrome.
@@ -187,6 +201,7 @@ public final class GridNSView: NSView {
                 layout = try renderer.draw(in: ctx, size: gridSize, scroll: scroll)
             }
             layoutCache = layout
+            publishScroll(layout)
             drawReferenceOutlines(ctx, layout: layout)
             drawDragPreview(ctx, layout: layout)
         } catch {
@@ -994,15 +1009,17 @@ public struct GridView: NSViewRepresentable {
     var topInset: CGFloat = 0
     var bottomInset: CGFloat = 0
     var trailingInset: CGFloat = 0
+    var scrollState: GridScrollState?
     var onFrame: ((Double) -> Void)?
 
     public init(document: SpreadsheetDocument, editor: EditController, topInset: CGFloat = 0, bottomInset: CGFloat = 0, trailingInset: CGFloat = 0,
-                onFrame: ((Double) -> Void)? = nil) {
+                scrollState: GridScrollState? = nil, onFrame: ((Double) -> Void)? = nil) {
         self.document = document
         self.editor = editor
         self.topInset = topInset
         self.bottomInset = bottomInset
         self.trailingInset = trailingInset
+        self.scrollState = scrollState
         self.onFrame = onFrame
     }
 
@@ -1013,6 +1030,7 @@ public struct GridView: NSViewRepresentable {
         view.onFrame = onFrame
         view.bottomInset = bottomInset
         view.trailingInset = trailingInset
+        view.scrollState = scrollState
         view.topInset = topInset
         return view
     }
@@ -1023,6 +1041,7 @@ public struct GridView: NSViewRepresentable {
         view.onFrame = onFrame
         view.bottomInset = bottomInset
         view.trailingInset = trailingInset
+        view.scrollState = scrollState
         view.topInset = topInset
         view.needsDisplay = true
     }

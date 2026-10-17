@@ -570,6 +570,11 @@ impl GridGeometry {
     pub fn range_panes(&self, range: CellRange) -> Vec<GridRect> {
         self.geo.range_panes(range.to_engine()).into_iter().map(GridRect::from).collect()
     }
+    /// How far the scrolled panes can scroll now (sheet units): what a scroll bar spans.
+    pub fn scroll_extent(&self) -> GridPoint {
+        let (x, y) = self.geo.scroll_extent(&self.sheet);
+        GridPoint { x, y }
+    }
     /// The scroll offset that brings `cell` into view.
     pub fn reveal(&self, cell: CellAddress) -> GridPoint {
         let (x, y) = self.geo.reveal(&self.sheet, CellRef::new(row_of(cell.row), col_of(cell.col)));

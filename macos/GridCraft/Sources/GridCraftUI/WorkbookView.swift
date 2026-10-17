@@ -15,6 +15,8 @@ public struct WorkbookView: View {
     /// How much of the grid's top the toolbar and the formula bar cover.
     @State private var toolbarHeight: CGFloat = 0
     @State private var formulaBarHeight: CGFloat = 0
+    /// Where the grid is scrolled across, for the status bar's scroller.
+    @State private var scrollState = GridScrollState()
     @State private var editor: EditController
 
     public init(document: SpreadsheetDocument, fileURL: URL? = nil) {
@@ -37,7 +39,9 @@ public struct WorkbookView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { formulaBarHeight = $0 }
             }
             .overlay(alignment: .bottom) {
-                WorkbookStatusBar(document: document)
+                WorkbookStatusBar(document: document, scrollState: scrollState) { x in
+                    if let grid = editor.grid { grid.scroll(to: CGPoint(x: x, y: grid.scroll.y)) }
+                }
                     // Its statistics move out from under the inspector.
                     .padding(.trailing, document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
@@ -58,7 +62,7 @@ public struct WorkbookView: View {
             .animation(.smooth(duration: 0.25), value: document.showInspector)
             .background {
                 GridView(document: document, editor: editor, topInset: toolbarHeight + formulaBarHeight, bottomInset: statusBarHeight,
-                         trailingInset: document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0)
+                         trailingInset: document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0, scrollState: scrollState)
                     .ignoresSafeArea(.container, edges: .top)
                     // Under the toolbar: the safe area it leaves at the top.
                     .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { toolbarHeight = $0 }

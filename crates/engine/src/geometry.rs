@@ -181,6 +181,21 @@ impl Geometry {
         out
     }
 
+    /// How far the scrolled panes can be scrolled now, in `scroll` units: through the used range
+    /// and some more (`scroll_span`), or to where they are already. What a scroll bar spans.
+    pub fn scroll_extent(&self, sh: &Sheet) -> (f32, f32) {
+        let (last_row, last_col) = scroll_span(sh);
+        let (left, top) = match &self.paper {
+            Some(pg) => (pg.col_x(last_col) as f32, pg.row_y(last_row) as f32),
+            None => (
+                (self.cols.start(last_col) - self.cols.start(self.frozen.1)) as f32,
+                (self.rows.start(last_row) - self.rows.start(self.frozen.0)) as f32,
+            ),
+        };
+        let visible = ((self.size.0 - self.frozen_w) / self.scale, (self.size.1 - self.frozen_h) / self.scale);
+        ((left - visible.0).max(self.scroll.0).max(0.0), (top - visible.1).max(self.scroll.1).max(0.0))
+    }
+
     /// The cells area.
     pub fn cells(&self) -> Rect {
         Rect { x: self.origin.0, y: self.origin.1, w: self.size.0, h: self.size.1 }
@@ -453,6 +468,15 @@ impl Geometry {
 /// Where a fill-handle drag of `source` to the cell under the pointer fills: the source
 /// extended along the axis the pointer moved further out on (the source itself while the
 /// pointer is inside it).
+/// The last row and column a scroll bar reaches: ten past the used range, and at least row 100
+/// and column Z.
+pub fn scroll_span(sh: &Sheet) -> (u32, u32) {
+    let used = sh.used_range();
+    let row = used.map(|r| r.end.row.saturating_add(10)).unwrap_or(100).clamp(100, MAX_ROWS - 1);
+    let col = used.map(|r| r.end.col.saturating_add(10)).unwrap_or(26).clamp(26, MAX_COLS - 1);
+    (row, col)
+}
+
 pub fn fill_target(source: RangeRef, pointer: CellRef) -> RangeRef {
     let below = i64::from(pointer.row) - i64::from(source.end.row);
     let above = i64::from(source.start.row) - i64::from(pointer.row);
@@ -630,5 +654,20 @@ mod tests {
         assert!(g.row_at(f32::MIN) < MAX_ROWS);
         let _ = g.panes();
         let _ = g.reveal(&sh, CellRef::new(MAX_ROWS - 1, MAX_COLS - 1));
+    }
+
+    #[test]
+    fn a_scroll_bar_spans_the_used_range_and_where_the_view_is() {
+        let mut sh = Sheet::new("S");
+        // Empty: to column Z, so a 10-column view can scroll 16 columns.
+        let g = Geometry::new(&sh, (0.0, 0.0), (10.0 * sh.default_col_width, 100.0), (0.0, 0.0), 1.0);
+        let (x, _) = g.scroll_extent(&sh);
+        assert!((x - 16.0 * sh.default_col_width).abs() < 0.5, "{x}");
+        // Data in column AZ (51): to column BJ (61).
+        sh.set_value(CellRef::new(0, 51), gridcraft_core::Value::Number(1.0));
+        assert_eq!(scroll_span(&sh).1, 61);
+        // Scrolled past it, the bar reaches where the view is.
+        let far = Geometry::new(&sh, (0.0, 0.0), (100.0, 100.0), (1.0e6, 0.0), 1.0);
+        assert_eq!(far.scroll_extent(&sh).0, 1.0e6);
     }
 }

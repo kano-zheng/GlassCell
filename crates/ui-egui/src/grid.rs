@@ -692,7 +692,7 @@ fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &G
     }
     let visible = track.height() / geo.z;
     let scroll = app.view().scroll.y;
-    let last = sh.used_range().map(|r| r.end.row.saturating_add(10)).unwrap_or(100).clamp(100, MAX_ROWS - 1);
+    let last = gridcraft_engine::geometry::scroll_span(sh).0;
     let content = geo.scroll_top_of(sh, last);
     let extent = (content - visible).max(scroll).max(0.0).min(limit);
     let id = ui.id().with("vscroll");
@@ -745,7 +745,7 @@ pub(crate) fn horizontal_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, track:
     let Some(sh) = wb.active() else { return };
     let visible = ((geo.cells.width() - geo.frozen_w) / geo.z).max(0.0);
     let scroll = app.view().scroll.x;
-    let last = sh.used_range().map(|r| r.end.col.saturating_add(10)).unwrap_or(26).clamp(26, MAX_COLS - 1);
+    let last = gridcraft_engine::geometry::scroll_span(sh).1;
     let content = geo.scroll_left_of(sh, last);
     let extent = (content - visible).max(scroll).max(0.0);
     let id = ui.id().with("hscroll");
