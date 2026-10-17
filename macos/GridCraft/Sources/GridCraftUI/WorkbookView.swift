@@ -98,7 +98,12 @@ public struct WorkbookView: View {
         .animation(.smooth(duration: 0.2), value: document.showPalette)
         .overlay {
             if let open = document.filterMenu {
-                FilterMenuOverlay(document: document, open: open)
+                FilterMenuOverlay(document: document, open: open) {
+                    // The grid takes the keyboard back before the search field goes, or its
+                    // focus ring stays on screen.
+                    if let grid = editor.grid { grid.window?.makeFirstResponder(grid) }
+                    document.filterMenu = nil
+                }
             }
         }
         .animation(.smooth(duration: 0.2), value: document.filterMenu?.id)

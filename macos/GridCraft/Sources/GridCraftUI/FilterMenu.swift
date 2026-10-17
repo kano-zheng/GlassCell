@@ -39,10 +39,20 @@ struct FilterMenuView: View {
             }
             Divider()
             Text("Filter").font(.headline)
+            // Its own focus ring, part of the panel: the system's is drawn apart from the view
+            // and lingered on screen for a moment after the panel closed.
             TextField("Search", text: $search)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .focused($searchFocused)
+                .focusEffectDisabled()
                 .onSubmit { if !applied.isEmpty { apply() } }
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .background(.background.opacity(0.6), in: .rect(cornerRadius: 7))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(searchFocused ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator), lineWidth: searchFocused ? 2 : 1)
+                }
             Toggle(search.isEmpty ? "(Select All)" : "(Select All Search Results)", isOn: Binding(
                 get: { matches.allSatisfy { shown[$0] == true } },
                 set: { on in for value in matches { shown[value] = on } }
@@ -121,6 +131,8 @@ struct OpenFilterMenu: Identifiable {
 struct FilterMenuOverlay: View {
     @ObservedObject var document: SpreadsheetDocument
     let open: OpenFilterMenu
+    /// Closes the menu (the grid takes the keyboard back first).
+    let close: () -> Void
     @State private var height: CGFloat = 420
 
     private static let width: CGFloat = 260
@@ -134,10 +146,10 @@ struct FilterMenuOverlay: View {
             let y = below + height <= size.height - Self.margin ? below : max(Self.margin, open.anchor.minY - 6 - height)
             ZStack(alignment: .topLeading) {
                 // A click beside the menu closes it (a button: a tap gesture missed clicks).
-                Button { document.filterMenu = nil } label: { Color.clear.contentShape(.rect) }
+                Button(action: close) { Color.clear.contentShape(.rect) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Close the filter menu")
-                FilterMenuView(document: document, menu: open.menu) { document.filterMenu = nil }
+                FilterMenuView(document: document, menu: open.menu, close: close)
                     .glassEffect(.regular, in: .rect(cornerRadius: 20))
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
                     .offset(x: x, y: y)
