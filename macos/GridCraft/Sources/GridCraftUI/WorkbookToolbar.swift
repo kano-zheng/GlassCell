@@ -57,6 +57,14 @@ struct WorkbookToolbar: CustomizableToolbarContent {
     }
 
     var body: some CustomizableToolbarContent {
+        // The document's name, a capsule by itself (the system title is removed).
+        ToolbarItem(id: "document", placement: .navigation) {
+            // In a container, so the toolbar keeps it a view (a bare Menu shows its icon only).
+            HStack(spacing: 0) {
+                DocumentTitleMenu(fileURL: fileURL)
+            }
+        }
+        .customizationBehavior(.disabled)
         // Neighbouring items share one piece of glass: the editing commands make one long
         // capsule; spacers set the view items apart.
         ToolbarItem(id: "undo") {
@@ -225,6 +233,42 @@ struct WorkbookToolbar: CustomizableToolbarContent {
         ("No Border", "none"), ("All Borders", "all"), ("Outside Borders", "outside"), ("Thick Outside Borders", "thickOutside"),
         ("Bottom Double Border", "doubleBottom"), ("Thick Bottom Border", "thickBottom"), ("Top and Bottom Border", "topBottom"),
     ]
+}
+
+/// The document's name in the toolbar, with the document menu the system title had: rename,
+/// move, duplicate, versions, and Show in Finder.
+struct DocumentTitleMenu: View {
+    let fileURL: URL?
+
+    var body: some View {
+        Menu {
+            Button("Rename…") { send(#selector(NSDocument.rename(_:))) }
+            Button("Move To…") { send(#selector(NSDocument.move(_:))) }
+            Button("Duplicate") { send(#selector(NSDocument.duplicate(_:))) }
+            Divider()
+            Button("Browse All Versions…") { send(#selector(NSDocument.browseVersions(_:))) }
+            if let fileURL {
+                Divider()
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([fileURL]) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "tablecells")
+                Text(fileURL?.lastPathComponent ?? String(localized: "Untitled"))
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .padding(.horizontal, 10)
+        .help(fileURL?.path ?? "")
+    }
+
+    /// The window's document handles these (it is in the responder chain).
+    private func send(_ action: Selector) {
+        NSApp.sendAction(action, to: nil, from: nil)
+    }
 }
 
 /// The font family picker: the cell's font first (also when the Mac lacks it), then every

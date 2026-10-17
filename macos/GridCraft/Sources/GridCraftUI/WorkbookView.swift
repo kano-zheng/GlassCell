@@ -55,6 +55,8 @@ public struct WorkbookView: View {
         .toolbar(id: "gridcraft.workbook") {
             WorkbookToolbar(document: document, editor: editor, undoManager: undoManager, fileURL: fileURL)
         }
+        // The toolbar shows the name in a capsule of its own.
+        .toolbar(removing: .title)
         .focusedSceneValue(\.workbook, WorkbookFocus(document: document, editor: editor, generation: document.generation))
         .sheet(item: $document.dialog) { request in
             CustomDialog(request: request, document: document, editor: editor)
