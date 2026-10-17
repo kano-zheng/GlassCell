@@ -23,7 +23,7 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
       - name: Version from the tag
@@ -71,6 +71,8 @@ jobs:
 
           It is signed ad hoc, not notarized: after the first launch, open System Settings › Privacy & Security and choose Open Anyway."
           if gh release view "$TAG" >/dev/null 2>&1; then
+            # A release made by hand for the tag: name it, describe it, and add the builds.
+            gh release edit "$TAG" --title "GlassCell $VERSION" --notes "$notes"
             gh release upload "$TAG" dist/* --clobber
           else
             gh release create "$TAG" dist/* --title "GlassCell $VERSION" --notes "$notes" --generate-notes
