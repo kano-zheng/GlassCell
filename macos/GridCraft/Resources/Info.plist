@@ -26,6 +26,8 @@
 		<string>sr</string>
 		<string>zh-Hans</string>
 	</array>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 kano-zheng. Based on GridCraft by the ArtCraft team. MIT or Apache-2.0.</string>
 	<key>CFBundleDisplayName</key>
 	<string>GlassCell</string>
 	<key>CFBundlePackageType</key>
