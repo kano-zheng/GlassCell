@@ -207,3 +207,18 @@ fn the_status_bar_sums_a_selection_in_its_format() {
     assert_eq!(items[0].value, "$176,670");
     assert_eq!(items[1].value, "4");
 }
+
+#[test]
+fn a_tables_header_has_a_filter_menu() {
+    let e = engine();
+    e.execute("file.new".into(), r#"{"sample": "sales"}"#.into()).unwrap();
+    let menu = e.filter_menu(CellAddress { row: 3, col: 1 }).unwrap().unwrap();
+    assert_eq!(menu.range, "B4:I11");
+    assert_eq!(menu.column, "B");
+    assert!(menu.values.iter().any(|v| v.text == "North" && v.shown));
+    assert!(e.filter_menu(CellAddress { row: 4, col: 1 }).unwrap().is_none());
+    let params = format!(r#"{{"column": "B", "values": ["North", "South"], "range": "{}"}}"#, menu.range);
+    e.execute("data.filterBy".into(), params).unwrap();
+    let menu = e.filter_menu(CellAddress { row: 3, col: 1 }).unwrap().unwrap();
+    assert!(menu.values.iter().any(|v| v.text == "East" && !v.shown));
+}

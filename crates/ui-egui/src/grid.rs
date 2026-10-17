@@ -2342,38 +2342,18 @@ fn popup_dismissed(response: &egui::Response, was_open: bool) -> bool {
 }
 
 /// The table whose header cell (`row`, `col`) was clicked, not just the first table in the column.
-fn filter_table_range(sh: &Sheet, col: u32, row: u32) -> Option<RangeRef> {
-    sh.tables.iter().find(|t| t.range.start.row == row && col >= t.range.start.col && col <= t.range.end.col).map(|t| t.range)
-}
-
 fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool) {
     let Some((col, row, at)) = app.grid.filter_menu else { return };
     let Some(d) = app.session.active() else { return };
     let wb = d.wb.clone();
     let si = wb.active_sheet;
-    let Some(sh) = wb.sheet(si) else { return };
     let _ = geo;
-    // Tables get an autofilter on demand.
-    let table_range = filter_table_range(sh, col, row);
-    if sh.autofilter.is_none()
-        && let Some(r) = table_range
-    {
-        let _ = app.session.run("data.filter", json!({"range": r.a1()}));
-        let _ = app.session.run("data.filter", json!({"range": r.a1()}));
-        if let Some(sh2) = app.session.active().and_then(|d| d.wb.active()).map(|s| s.autofilter.is_some())
-            && !sh2
-        {
-            let d = app.session.active_mut();
-            if let Some(d) = d {
-                let wbm = Arc::make_mut(&mut d.wb);
-                if let Some(s) = wbm.sheet_mut(si) {
-                    s.autofilter = Some(gridcraft_engine::model::AutoFilter { range: r, criteria: vec![] });
-                }
-            }
-        }
-    }
-    let wb = app.session.active().map(|d| d.wb.clone()).unwrap_or(wb);
-    let values = gridcraft_engine::cmd::data::filter_values(&wb, si, col);
+    // The sheet's filter, or the table whose header was clicked (`data.filterBy` filters it on demand).
+    let Some(menu) = gridcraft_engine::cmd::data::filter_menu(&wb, si, CellRef::new(row, col)) else {
+        app.grid.filter_menu = None;
+        return;
+    };
+    let (values, range) = (menu.values, menu.range.a1());
     let key = egui::Id::new(("filter_sel", col));
     let search_key = egui::Id::new(("filter_search", col));
     let buttons_key = egui::Id::new(("filter_buttons", col));
@@ -2432,7 +2412,7 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
             ui.horizontal(|ui| {
                 let clear = ui.button("Clear Filter");
                 if clear.clicked() {
-                    let _ = app.run("data.filterBy", json!({"column": col_to_letters(col), "clear": true}));
+                    let _ = app.run("data.filterBy", json!({"column": col_to_letters(col), "clear": true, "range": range}));
                     close = true;
                 }
                 // Nothing checked would hide every row, so Enter (unlike a click on Apply) does nothing then.
@@ -2443,9 +2423,9 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
                     let blanks = checks.iter().any(|(v, on)| v == "(Blanks)" && *on);
                     let vals: Vec<String> = checks.iter().filter(|(v, on)| *on && v != "(Blanks)").map(|(v, _)| v.clone()).collect();
                     let p = if checks.iter().all(|(_, b)| *b) {
-                        json!({"column": col_to_letters(col), "clear": true})
+                        json!({"column": col_to_letters(col), "clear": true, "range": range})
                     } else {
-                        json!({"column": col_to_letters(col), "values": vals, "blanks": blanks})
+                        json!({"column": col_to_letters(col), "values": vals, "blanks": blanks, "range": range})
                     };
                     let _ = app.run("data.filterBy", p);
                     close = true;
@@ -3004,34 +2984,6 @@ mod tests {
         assert_eq!(zoom_glide_step(100, 120, 5.0), 120);
         assert_eq!(zoom_glide_step(120, 120, 0.5), 120);
         assert_eq!(zoom_glide_step(0, 10, 0.5), 3);
-    }
-
-    #[test]
-    fn filter_menu_uses_the_table_whose_header_was_clicked() {
-        use gridcraft_engine::model::Table;
-        let table = |id: u32, r0: u32, r1: u32| Table {
-            id,
-            name: format!("T{id}"),
-            range: RangeRef::new(CellRef::new(r0, 0), CellRef::new(r1, 0)),
-            header_row: true,
-            totals_row: false,
-            columns: vec![],
-            style: String::new(),
-            banded_rows: true,
-            banded_cols: false,
-            first_col: false,
-            last_col: false,
-            filter_button: true,
-            filter: vec![],
-            table_type: None,
-            connection_id: None,
-        };
-        let mut sh = Sheet::new("S");
-        sh.tables.push(table(1, 0, 2));
-        sh.tables.push(table(2, 4, 7));
-        assert_eq!(filter_table_range(&sh, 0, 4), Some(sh.tables[1].range));
-        assert_eq!(filter_table_range(&sh, 0, 0), Some(sh.tables[0].range));
-        assert_eq!(filter_table_range(&sh, 1, 4), None);
     }
 
     #[test]

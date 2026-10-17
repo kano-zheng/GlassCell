@@ -278,6 +278,19 @@ impl Engine {
         })
     }
 
+    /// The filter dropdown of header cell `cell` (the sheet's filter, or a table's header row).
+    pub fn filter_menu(&self, cell: CellAddress) -> Result<Option<FilterMenu>, FfiError> {
+        guard(|| {
+            let (wb, si) = self.workbook()?;
+            let at = CellRef::new(row_of(cell.row), col_of(cell.col));
+            Ok(gridcraft_engine::cmd::data::filter_menu(&wb, si, at).map(|menu| FilterMenu {
+                range: menu.range.a1(),
+                column: gridcraft_engine::core::col_to_letters(at.col),
+                values: menu.values.into_iter().map(|(text, shown)| FilterValue { text, shown }).collect(),
+            }))
+        })
+    }
+
     /// The status bar's Sum / Count / Average for the selection (none for a single cell).
     pub fn status_items(&self) -> Result<Vec<StatusItem>, FfiError> {
         guard(|| {

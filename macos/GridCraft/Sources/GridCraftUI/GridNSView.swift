@@ -36,13 +36,22 @@ public final class GridNSView: NSView {
 
     private lazy var popup: EditorPopupView = {
         let view = EditorPopupView(frame: .zero)
-        view.isHidden = true
         view.onPick = { [weak self] index in
             self?.editor?.acceptAutocomplete(index)
             self?.cellEditor.sync(force: true)
         }
-        addSubview(view)
+        view.autoresizingMask = [.width, .height]
+        popupGlass.contentView = view
         return view
+    }()
+
+    /// The Liquid Glass the popup sits on.
+    private lazy var popupGlass: NSGlassEffectView = {
+        let glass = NSGlassEffectView(frame: .zero)
+        glass.cornerRadius = 10
+        glass.isHidden = true
+        addSubview(glass)
+        return glass
     }()
 
     private let measurer = CoreTextMeasurer()
@@ -209,7 +218,7 @@ public final class GridNSView: NSView {
     private func positionEditor() {
         guard let editor, editor.isEditing, let document, let layout = try? GridRenderer(engine: document.engine, measurer: measurer).layout(size: bounds.size, scroll: scroll) else {
             cellEditor.isHidden = true
-            popup.isHidden = true
+            popupGlass.isHidden = true
             return
         }
         let r = cgRect(layout.geometry.cellRect(cell: editor.cell))
@@ -220,8 +229,9 @@ public final class GridNSView: NSView {
         cellEditor.frame = NSRect(x: r.minX, y: r.minY, width: width, height: height)
         cellEditor.isHidden = r.maxX < layout.headerWidth || r.minY > bounds.height
         let size = popup.fittingSize()
-        popup.isHidden = size == .zero || cellEditor.isHidden
-        popup.frame = NSRect(x: r.minX, y: cellEditor.frame.maxY + 2, width: size.width, height: size.height)
+        popupGlass.isHidden = size == .zero || cellEditor.isHidden
+        popupGlass.frame = NSRect(x: r.minX, y: cellEditor.frame.maxY + 4, width: size.width, height: size.height)
+        popup.frame = popupGlass.bounds
         popup.needsDisplay = true
     }
 
@@ -246,7 +256,7 @@ public final class GridNSView: NSView {
     /// The edit ended (confirmed or cancelled).
     public func editorEnded() {
         cellEditor.isHidden = true
-        popup.isHidden = true
+        popupGlass.isHidden = true
         window?.makeFirstResponder(self)
         reveal()
         needsDisplay = true
@@ -422,7 +432,12 @@ public final class GridNSView: NSView {
             selectRows(dragAnchor.row, row)
         } else {
             switch geometry.hit(x: Float(p.x), y: Float(p.y)) {
-            case let .cell(cell), let .filterButton(cell):
+            case let .filterButton(cell):
+                // The header's ▾: select it (sorting acts on its region) and open its menu.
+                drag = .none
+                select(CellRange(first: cell, last: cell))
+                showFilterMenu(for: cell, at: cgRect(geometry.filterButton(cell: cell)))
+            case let .cell(cell):
                 dragAnchor = shiftAnchor(flags) ?? cell
                 drag = .cells
                 select(CellRange(first: dragAnchor, last: cell))

@@ -637,6 +637,23 @@ pub struct SelectionState {
     pub ranges: Vec<CellRange>,
 }
 
+/// A header cell's filter dropdown: the range it filters (`data.filterBy`'s `range`), the
+/// column's letters, and the column's distinct values.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct FilterMenu {
+    pub range: String,
+    pub column: String,
+    pub values: Vec<FilterValue>,
+}
+
+/// A value in a filter dropdown, as displayed (`(Blanks)` for empty cells), and whether the
+/// filter shows it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct FilterValue {
+    pub text: String,
+    pub shown: bool,
+}
+
 /// One status-bar statistic: `Sum`, `Count` or `Average`, and its value as displayed.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct StatusItem {

@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Filter Column",
             [],
             None,
-            "{column: \"B\" (or 0-based offset), values?: [..], blanks?: bool, custom?: {op: \">\", value: \"10\", op2?, value2?, and?}, top?: {count, bottom?, percent?}, aboveAverage?: bool, clear?: bool}",
+            "{column: \"B\" (or 0-based offset), values?: [..], blanks?: bool, custom?: {op: \">\", value: \"10\", op2?, value2?, and?}, top?: {count, bottom?, percent?}, aboveAverage?: bool, clear?: bool, range?: where a sheet without a filter gets one (a table's range)}",
             has_doc,
             filter_by
         ),
@@ -496,7 +496,7 @@ fn filter_by(s: &mut Session, p: &Json) -> Result<Json> {
     let af = match &sh.autofilter {
         Some(a) => a.clone(),
         None => {
-            install_filter(s, &json!({}))?;
+            install_filter(s, &p.get("range").map_or_else(|| json!({}), |r| json!({"range": r})))?;
             s.doc()?.wb.sheet(sheet).and_then(|sh| sh.autofilter.clone()).ok_or_else(|| EngineError::Other("no filter".into()))?
         }
     };
@@ -695,10 +695,36 @@ fn reapply(s: &mut Session, _: &Json) -> Result<Json> {
 pub fn filter_values(wb: &Workbook, sheet: usize, col: u32) -> Vec<(String, bool)> {
     let Some(sh) = wb.sheet(sheet) else { return vec![] };
     let Some(af) = &sh.autofilter else { return vec![] };
-    let off = col.saturating_sub(af.range.start.col);
-    let selected: Option<&FilterCriterion> = af.criteria.iter().find(|(o, _)| *o == off).map(|(_, c)| c);
+    column_values(wb, sh, af.range, &af.criteria, col)
+}
+
+/// A header cell's filter dropdown: the range it filters and its column's values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FilterMenu {
+    /// The sheet's filter, or the table whose header row holds the cell (`data.filterBy`
+    /// with this `range` puts a filter on it).
+    pub range: RangeRef,
+    /// Each distinct value as displayed (`(Blanks)` for empty cells) and whether it is shown.
+    pub values: Vec<(String, bool)>,
+}
+
+/// The filter dropdown of header cell `at`, if it has one.
+pub fn filter_menu(wb: &Workbook, sheet: usize, at: CellRef) -> Option<FilterMenu> {
+    let sh = wb.sheet(sheet)?;
+    let heads = |r: &RangeRef| r.start.row == at.row && (r.start.col..=r.end.col).contains(&at.col);
+    let (range, criteria) = match &sh.autofilter {
+        Some(af) if heads(&af.range) => (af.range, af.criteria.as_slice()),
+        _ => (sh.tables.iter().map(|t| t.range).find(heads)?, &[][..]),
+    };
+    Some(FilterMenu { range, values: column_values(wb, sh, range, criteria, at.col) })
+}
+
+/// The distinct values of column `col` below `range`'s header row, and whether `criteria` show them.
+fn column_values(wb: &Workbook, sh: &Sheet, range: RangeRef, criteria: &[(u32, FilterCriterion)], col: u32) -> Vec<(String, bool)> {
+    let off = col.saturating_sub(range.start.col);
+    let selected: Option<&FilterCriterion> = criteria.iter().find(|(o, _)| *o == off).map(|(_, c)| c);
     let mut seen = std::collections::BTreeMap::new();
-    for row in af.range.start.row + 1..=af.range.end.row.min(af.range.start.row + 1_000_000) {
+    for row in range.start.row + 1..=range.end.row.min(range.start.row + 1_000_000) {
         let c = CellRef::new(row, col);
         let v = sh.value(c);
         let t = if v.is_empty() { "(Blanks)".to_string() } else { crate::display::cell_text(wb, sh, c) };
@@ -1312,6 +1338,30 @@ fn subtotal(s: &mut Session, p: &Json) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tables_filter_menu_lists_its_column_and_filters_it_on_demand() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["Name", "Qty"], ["a", 1], ["b", 2], ["a", 3]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "A6", "values": [["City"], ["Oslo"], ["Rome"]]})).unwrap();
+        s.execute("insert.table", json!({"range": "A1:B4"})).unwrap();
+        s.execute("insert.table", json!({"range": "A6:A8"})).unwrap();
+        let wb = s.doc().unwrap().wb.clone();
+        // The table whose header row was clicked; a cell below a header has no menu.
+        let menu = filter_menu(&wb, 0, CellRef::new(5, 0)).unwrap();
+        assert_eq!(menu.range.a1(), "A6:A8");
+        assert_eq!(menu.values, vec![("Oslo".to_string(), true), ("Rome".to_string(), true)]);
+        assert!(filter_menu(&wb, 0, CellRef::new(1, 0)).is_none());
+        assert_eq!(filter_menu(&wb, 0, CellRef::new(0, 0)).unwrap().values.len(), 2);
+        // Applying puts the filter on that table.
+        s.execute("data.filterBy", json!({"column": "A", "values": ["Rome"], "range": menu.range.a1()})).unwrap();
+        let wb = s.doc().unwrap().wb.clone();
+        assert_eq!(wb.sheet(0).and_then(|sh| sh.autofilter.as_ref()).map(|a| a.range.a1()), Some("A6:A8".into()));
+        assert!(wb.sheet(0).unwrap().is_row_hidden(6));
+        let menu = filter_menu(&wb, 0, CellRef::new(5, 0)).unwrap();
+        assert_eq!(menu.values, vec![("Oslo".to_string(), false), ("Rome".to_string(), true)]);
+    }
 
     #[test]
     fn filter_by_huge_numeric_column_is_rejected_not_overflowed() {
