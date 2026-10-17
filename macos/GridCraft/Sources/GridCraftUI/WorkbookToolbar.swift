@@ -36,11 +36,12 @@ struct WorkbookToolbar: CustomizableToolbarContent {
     }
 
     var body: some CustomizableToolbarContent {
+        // Neighbouring items share one piece of glass; spacers split the groups.
         ToolbarItem(id: "undo", placement: .navigation) {
-            ControlGroup {
-                Button("Undo", systemImage: "arrow.uturn.backward") { undoManager?.undo() }
-                Button("Redo", systemImage: "arrow.uturn.forward") { undoManager?.redo() }
-            }
+            Button("Undo", systemImage: "arrow.uturn.backward") { undoManager?.undo() }
+        }
+        ToolbarItem(id: "redo", placement: .navigation) {
+            Button("Redo", systemImage: "arrow.uturn.forward") { undoManager?.redo() }
         }
         ToolbarItem(id: "formatPainter") {
             Button("Format Painter", systemImage: "paintbrush.pointed") { run("edit.formatPainter") }
@@ -57,12 +58,15 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             }
             .help("Font Size")
         }
-        ToolbarItem(id: "style") {
-            ControlGroup {
-                toggle("home.bold", "Bold", "bold", isOn: format?.active.bold)
-                toggle("home.italic", "Italic", "italic", isOn: format?.active.italic)
-                toggle("home.underline", "Underline", "underline", isOn: format?.active.underline.map { $0 != .none })
-            }
+        ToolbarSpacer(.fixed)
+        ToolbarItem(id: "bold") {
+            toggle("home.bold", "Bold", "bold", isOn: format?.active.bold)
+        }
+        ToolbarItem(id: "italic") {
+            toggle("home.italic", "Italic", "italic", isOn: format?.active.italic)
+        }
+        ToolbarItem(id: "underline") {
+            toggle("home.underline", "Underline", "underline", isOn: format?.active.underline.map { $0 != .none })
         }
         ToolbarItem(id: "fontColor") {
             ColorMenu(title: "Font Color", symbol: "character", automatic: "Automatic") { hex in run("home.fontColor", ["color": hex ?? "auto"]) }
@@ -70,6 +74,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
         ToolbarItem(id: "fill") {
             ColorMenu(title: "Fill Color", symbol: "drop.halffull", automatic: "No Fill") { hex in run("home.fillColor", ["color": hex ?? "none"]) }
         }
+        ToolbarSpacer(.fixed)
         ToolbarItem(id: "alignment") {
             Picker("Alignment", selection: Binding(get: { format?.active.halign ?? .general }, set: { align in
                 switch align {
@@ -93,6 +98,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             Button("Merge & Center", systemImage: "arrow.left.and.right.square") { run("home.mergeCenter") }
                 .help("Merge & Center")
         }
+        ToolbarSpacer(.fixed)
         ToolbarItem(id: "borders") {
             Menu {
                 ForEach(Self.borderPresets, id: \.preset) { item in
@@ -102,6 +108,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
                 Label("Borders", systemImage: "square.dashed")
             }
             .help("Borders")
+            .menuIndicator(.hidden)
         }
         ToolbarItem(id: "numberFormat") {
             Menu {
@@ -119,7 +126,9 @@ struct WorkbookToolbar: CustomizableToolbarContent {
                 Label(format?.active.numberKind ?? "Number Format", systemImage: "number")
             }
             .help("Number Format")
+            .menuIndicator(.hidden)
         }
+        ToolbarSpacer(.fixed)
         ToolbarItem(id: "autoSum") {
             Menu {
                 ForEach(["SUM", "AVERAGE", "COUNT", "MAX", "MIN"], id: \.self) { function in
@@ -145,6 +154,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
                 Label("Sort & Filter", systemImage: "line.3.horizontal.decrease")
             }
             .help("Sort & Filter")
+            .menuIndicator(.hidden)
         }
         ToolbarItem(id: "insert") {
             Menu {
@@ -165,7 +175,9 @@ struct WorkbookToolbar: CustomizableToolbarContent {
                 Label("Insert", systemImage: "plus.square.on.square")
             }
             .help("Insert")
+            .menuIndicator(.hidden)
         }
+        ToolbarSpacer(.flexible)
         ToolbarItem(id: "zoom") {
             let levels = Array(Set([50, 75, 100, 125, 150, 200, Int(zoom)])).sorted()
             PopUpPicker(items: levels.map { "\($0)%" }, selected: "\(zoom)%", width: 70) { title in
@@ -180,6 +192,7 @@ struct WorkbookToolbar: CustomizableToolbarContent {
             }
             .help("Share")
         }
+        ToolbarSpacer(.fixed)
         ToolbarItem(id: "inspector") {
             Button("Inspector", systemImage: "sidebar.trailing") { document.showInspector.toggle() }
                 .help("Show or hide the inspector")
@@ -240,6 +253,7 @@ struct ColorMenu: View {
             Label(title, systemImage: symbol)
         }
         .help(title)
+        .menuIndicator(.hidden)
     }
 
     /// A small square of `hex` for the menu.
