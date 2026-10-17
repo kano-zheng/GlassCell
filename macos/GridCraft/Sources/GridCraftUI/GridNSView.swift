@@ -18,6 +18,8 @@ public final class GridNSView: NSView {
     /// Points at the bottom covered by the window's floating status bar: revealing a cell keeps
     /// it above them.
     public var bottomInset: CGFloat = 0
+    /// Points at the right covered by the floating inspector: revealing a cell keeps it left of them.
+    public var trailingInset: CGFloat = 0
     /// Points at the top covered by the window's toolbar and formula bar. The grid starts below
     /// them; above, the rows scrolled past go on under frosted glass, the column headers on it.
     /// This view's coordinates start where the grid does (its bounds begin at `-topInset`).
@@ -780,9 +782,11 @@ public final class GridNSView: NSView {
     /// Scrolls the active cell into view.
     public func reveal() {
         guard let document, var layout = layoutCache, let active = try? document.engine.selection().active else { return }
-        if bottomInset > 0, gridSize.height > bottomInset * 2,
+        let width = bounds.width - (bounds.width > trailingInset * 2 ? trailingInset : 0)
+        let height = gridSize.height - (gridSize.height > bottomInset * 2 ? bottomInset : 0)
+        if width < bounds.width || height < gridSize.height,
             let uncovered = try? GridRenderer(engine: document.engine, measurer: measurer)
-                .layout(size: CGSize(width: bounds.width, height: gridSize.height - bottomInset), scroll: scroll)
+                .layout(size: CGSize(width: width, height: height), scroll: scroll)
         {
             layout = uncovered
         }
@@ -989,13 +993,16 @@ public struct GridView: NSViewRepresentable {
     let editor: EditController
     var topInset: CGFloat = 0
     var bottomInset: CGFloat = 0
+    var trailingInset: CGFloat = 0
     var onFrame: ((Double) -> Void)?
 
-    public init(document: SpreadsheetDocument, editor: EditController, topInset: CGFloat = 0, bottomInset: CGFloat = 0, onFrame: ((Double) -> Void)? = nil) {
+    public init(document: SpreadsheetDocument, editor: EditController, topInset: CGFloat = 0, bottomInset: CGFloat = 0, trailingInset: CGFloat = 0,
+                onFrame: ((Double) -> Void)? = nil) {
         self.document = document
         self.editor = editor
         self.topInset = topInset
         self.bottomInset = bottomInset
+        self.trailingInset = trailingInset
         self.onFrame = onFrame
     }
 
@@ -1005,6 +1012,7 @@ public struct GridView: NSViewRepresentable {
         view.editor = editor
         view.onFrame = onFrame
         view.bottomInset = bottomInset
+        view.trailingInset = trailingInset
         view.topInset = topInset
         return view
     }
@@ -1014,6 +1022,7 @@ public struct GridView: NSViewRepresentable {
         view.document = document
         view.onFrame = onFrame
         view.bottomInset = bottomInset
+        view.trailingInset = trailingInset
         view.topInset = topInset
         view.needsDisplay = true
     }

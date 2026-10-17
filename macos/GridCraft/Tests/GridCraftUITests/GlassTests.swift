@@ -48,4 +48,18 @@ import Testing
         let a10 = try #require(grid.cellFrame(CellAddress(row: 9, col: 0)))
         #expect(grid.gridBounds.minY <= a10.minY)
     }
+
+    @Test func aRevealedCellStaysLeftOfTheInspector() throws {
+        let document = SpreadsheetDocument(sample: "sales")
+        let grid = GridNSView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        grid.document = document
+        grid.trailingInset = 310
+        let rep = try #require(grid.bitmapImageRepForCachingDisplay(in: grid.bounds))
+        grid.cacheDisplay(in: grid.bounds, to: rep)
+        document.run("selection.set", ["range": "N25"])
+        grid.reveal()
+        let cell = try #require(grid.cellFrame(CellAddress(row: 24, col: 13)))
+        #expect(grid.scroll.x > 0)
+        #expect(cell.maxX <= grid.bounds.width - 310)
+    }
 }

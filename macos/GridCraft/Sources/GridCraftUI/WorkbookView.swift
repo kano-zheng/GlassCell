@@ -10,6 +10,8 @@ public struct WorkbookView: View {
     @Environment(\.undoManager) private var undoManager
     /// How much of the grid's bottom the status bar covers.
     @State private var statusBarHeight: CGFloat = 0
+    static let inspectorWidth: CGFloat = 300
+    static let inspectorMargin: CGFloat = 10
     /// How much of the grid's top the toolbar and the formula bar cover.
     @State private var toolbarHeight: CGFloat = 0
     @State private var formulaBarHeight: CGFloat = 0
@@ -36,10 +38,27 @@ public struct WorkbookView: View {
             }
             .overlay(alignment: .bottom) {
                 WorkbookStatusBar(document: document)
+                    // Its statistics move out from under the inspector.
+                    .padding(.trailing, document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
             }
+            .overlay(alignment: .topTrailing) {
+                // The inspector floats over the grid on a pane of glass.
+                if document.showInspector {
+                    InspectorView(document: document, editor: editor)
+                        .frame(width: Self.inspectorWidth)
+                        .frame(maxHeight: .infinity)
+                        .clipShape(.rect(cornerRadius: 22))
+                        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+                        .padding(.top, formulaBarHeight + 2)
+                        .padding([.trailing, .bottom], Self.inspectorMargin)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            .animation(.smooth(duration: 0.25), value: document.showInspector)
             .background {
-                GridView(document: document, editor: editor, topInset: toolbarHeight + formulaBarHeight, bottomInset: statusBarHeight)
+                GridView(document: document, editor: editor, topInset: toolbarHeight + formulaBarHeight, bottomInset: statusBarHeight,
+                         trailingInset: document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0)
                     .ignoresSafeArea(.container, edges: .top)
                     // Under the toolbar: the safe area it leaves at the top.
                     .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { toolbarHeight = $0 }
@@ -58,10 +77,6 @@ public struct WorkbookView: View {
             }
         }
         .animation(.smooth(duration: 0.2), value: document.showPalette)
-        .inspector(isPresented: $document.showInspector) {
-            InspectorView(document: document, editor: editor)
-                .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
-        }
         .toolbar(id: "gridcraft.workbook") {
             WorkbookToolbar(document: document, editor: editor, undoManager: undoManager, fileURL: fileURL)
         }

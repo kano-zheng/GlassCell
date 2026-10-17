@@ -200,6 +200,8 @@ struct CellInspector: View {
             }
         }
         .formStyle(.grouped)
+        // The panel's glass shows through.
+        .scrollContentBackground(.hidden)
     }
 
     static let categories = ["General", "Number", "Currency", "Accounting", "Date", "Time", "Percentage", "Fraction", "Scientific", "Text"]
@@ -275,5 +277,7 @@ struct SheetInspector: View {
             }
         }
         .formStyle(.grouped)
+        // The panel's glass shows through.
+        .scrollContentBackground(.hidden)
     }
 }
