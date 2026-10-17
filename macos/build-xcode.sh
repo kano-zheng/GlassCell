@@ -18,9 +18,14 @@ echo "== Xcode project"
 (cd "$ROOT/macos" && xcodegen generate --quiet --spec project.yml)
 
 echo "== GridCraft.app ($CONFIG)"
+# Xcode's build database can recompile a changed GridCraftUI and then skip relinking the app
+# (or skip making a deleted one): let it plan afresh, and make the app anew.
+rm -rf "$OUT/xcode/Build/Intermediates.noindex/XCBuildData" "$OUT/xcode/Build/Products/$CONFIG/GridCraft.app"
 xcodebuild -project "$ROOT/macos/GridCraft.xcodeproj" -scheme GridCraft -configuration "$CONFIG" \
     -derivedDataPath "$OUT/xcode" -destination 'platform=macOS' build -quiet
 mkdir -p "$OUT"
 rm -rf "$OUT/GridCraft.app"
-cp -R "$OUT/xcode/Build/Products/$CONFIG/GridCraft.app" "$OUT/GridCraft.app"
+APP="$OUT/xcode/Build/Products/$CONFIG/GridCraft.app"
+[ -x "$APP/Contents/MacOS/GridCraft" ] || { echo "error: xcodebuild made no GridCraft.app" >&2; exit 1; }
+cp -R "$APP" "$OUT/GridCraft.app"
 echo "== done: $OUT/GridCraft.app"
