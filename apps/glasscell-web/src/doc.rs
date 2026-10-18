@@ -678,6 +678,12 @@ impl Doc {
         Ok((name, bytes))
     }
 
+    /// Changes whenever the workbook's content does (edits, undo, redo, another file), and not
+    /// for scrolling or selecting: what a drawing can be cached against.
+    pub fn data_version(&self) -> u64 {
+        self.session.active().map_or(0, |d| d.uid.wrapping_mul(1 << 32) ^ d.revision ^ (std::sync::Arc::as_ptr(&d.wb) as usize as u64))
+    }
+
     /// The object `r`, as the engine lists it now.
     pub fn object(&self, r: ObjectRef) -> Option<ObjectView> {
         self.objects().into_iter().find(|o| o.id == r.id && kind_name(&o.kind) == r.kind)
@@ -1286,6 +1292,26 @@ mod tests {
         let mut other = Doc::new();
         other.open_bytes("Mine.xlsx", &bytes).expect("reopen");
         assert!(!other.sheet_tabs().is_empty());
+    }
+
+    #[test]
+    fn the_data_version_changes_with_content_and_not_with_the_view() {
+        let mut doc = Doc::sample("sales");
+        let v0 = doc.data_version();
+        doc.select(CellRef::new(3, 3), false).expect("select");
+        doc.scroll_by(VIEW, 0.0, 200.0);
+        assert_eq!(doc.data_version(), v0, "selecting and scrolling are not changes");
+        doc.run("cell.set", json!({"cell": "C5", "input": "5"})).expect("edit");
+        let v1 = doc.data_version();
+        assert_ne!(v1, v0);
+        doc.run("edit.undo", json!({})).expect("undo");
+        assert_ne!(doc.data_version(), v1, "undo is a change");
+        doc.run("edit.redo", json!({})).expect("redo");
+        doc.run("edit.undo", json!({})).expect("undo");
+        let v2 = doc.data_version();
+        doc.run("edit.redo", json!({})).expect("redo");
+        assert_ne!(doc.data_version(), v2);
+        assert_eq!(Doc::new().data_version(), 0);
     }
 
     #[test]

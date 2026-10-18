@@ -17,7 +17,7 @@ fn window_fn(name: &str) -> Option<Function> {
 }
 
 /// Calls `obj.method(...args)` and waits for what it gives back.
-async fn invoke(obj: &JsValue, method: &str, args: &[JsValue]) -> Result<JsValue, JsValue> {
+pub(super) async fn invoke(obj: &JsValue, method: &str, args: &[JsValue]) -> Result<JsValue, JsValue> {
     let f = Reflect::get(obj, &method.into())?.dyn_into::<Function>().map_err(|_| JsValue::from_str("not a function"))?;
     let list = Array::new();
     args.iter().for_each(|a| {
@@ -197,4 +197,30 @@ fn download(name: &str, bytes: &[u8]) {
         a.click();
     }
     let _ = web_sys::Url::revoke_object_url(&url);
+}
+
+/// `?open=/book.xlsx`: a workbook on the page's own server, opened at start (demos, embedding).
+/// Only paths on this origin are fetched.
+pub(super) fn open_from_url(app: App, path: String) {
+    if !path.starts_with('/') || path.starts_with("//") {
+        return app.show(Some("Only a path on this server can be opened.".into()));
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let Some(window) = web_sys::window() else { return };
+        let fetched = async {
+            let response = invoke(&window.into(), "fetch", &[path.as_str().into()]).await?;
+            if Reflect::get(&response, &"ok".into())?.as_bool() != Some(true) {
+                return Err(JsValue::from_str("The file wasn't found."));
+            }
+            let buffer = invoke(&response, "arrayBuffer", &[]).await?;
+            Ok::<_, JsValue>(Uint8Array::new(&buffer).to_vec())
+        };
+        match fetched.await {
+            Ok(bytes) => {
+                let name = path.rsplit('/').next().unwrap_or("Book.xlsx").to_string();
+                app.change(|d| d.open_bytes(&name, &bytes).map(|_| ()));
+            }
+            Err(e) => app.show(Some(describe(&e))),
+        }
+    });
 }

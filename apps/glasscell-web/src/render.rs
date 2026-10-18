@@ -109,16 +109,41 @@ pub enum Preview {
 #[derive(Default)]
 pub struct Scene {
     pub objects: Vec<ObjectView>,
-    pub charts: HashMap<u32, Vec<Prim>>,
+    pub charts: HashMap<u32, Rc<Vec<Prim>>>,
+}
+
+/// A chart's primitives are cached against what they depend on: the workbook's content, the
+/// sheet, the chart and its size. Laying a chart out measures all its text, so redoing it on
+/// every scroll step cost far more than drawing the cells.
+type ChartKey = (u64, usize, u32, u32, u32);
+
+thread_local! {
+    static CHARTS: RefCell<HashMap<ChartKey, Rc<Vec<Prim>>>> = RefCell::new(HashMap::new());
 }
 
 impl Scene {
     pub fn of(doc: &Doc) -> Scene {
         let objects = doc.objects();
+        let version = doc.data_version();
+        let sheet = doc.workbook().map_or(0, |wb| wb.active_sheet);
         let charts = objects
             .iter()
             .filter(|o| o.kind == ObjectKind::Chart)
-            .filter_map(|o| doc.chart_prims(o.id, &crate::measure::ChartMeasure).map(|p| (o.id, p)))
+            .filter_map(|o| {
+                let key = (version, sheet, o.id, o.anchor.width.to_bits(), o.anchor.height.to_bits());
+                if let Some(prims) = CHARTS.with(|c| c.borrow().get(&key).cloned()) {
+                    return Some((o.id, prims));
+                }
+                let prims = Rc::new(doc.chart_prims(o.id, &crate::measure::ChartMeasure)?);
+                CHARTS.with(|c| {
+                    let mut c = c.borrow_mut();
+                    if c.len() >= 64 {
+                        c.clear();
+                    }
+                    c.insert(key, prims.clone());
+                });
+                Some((o.id, prims))
+            })
             .collect();
         Scene { objects, charts }
     }
@@ -676,7 +701,7 @@ fn objects(ctx: &Ctx, f: &Frame) {
                 fill_rect(ctx, f64::from(r.x), f64::from(r.y), f64::from(r.w), f64::from(r.h));
                 ctx.restore();
                 if let Some(prims) = f.scene.charts.get(&o.id) {
-                    draw_prims(ctx, prims, (f64::from(r.x), f64::from(r.y)), z);
+                    draw_prims(ctx, prims.as_slice(), (f64::from(r.x), f64::from(r.y)), z);
                 }
             }
             ObjectKind::Slicer { caption } => {

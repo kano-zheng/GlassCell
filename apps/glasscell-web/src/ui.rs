@@ -106,6 +106,9 @@ struct App {
     filter: RwSignal<Option<OpenFilter>, LocalStorage>,
     /// The labels of what Undo and Redo would undo and redo (`None`: nothing, so disabled).
     history: RwSignal<(Option<String>, Option<String>)>,
+    /// Sum, Count and Average of a multi-cell selection: worked out once per change, not once
+    /// per place that shows them (over a million cells it is the slowest thing a change does).
+    stats: RwSignal<Vec<(&'static str, String)>>,
     /// The catalog's keyboard shortcuts, and whether this is a Mac (⌘ is the command key).
     shortcuts: StoredValue<Vec<(Chord, &'static str)>, LocalStorage>,
     mac: bool,
@@ -121,6 +124,7 @@ impl App {
     fn new(doc: Doc) -> App {
         let fmt = doc.selection_format();
         let history = doc.history();
+        let stats = doc.status_items();
         let table = shortcuts::table(&doc.session.commands());
         let mac = web_sys::window().and_then(|w| w.navigator().platform().ok()).is_some_and(|p| p.contains("Mac"));
         App {
@@ -139,6 +143,7 @@ impl App {
             preview: RwSignal::new(None),
             filter: RwSignal::new_local(None),
             history: RwSignal::new(history),
+            stats: RwSignal::new(stats),
             shortcuts: StoredValue::new_local(table),
             mac,
             dialog: RwSignal::new_local(None),
@@ -157,6 +162,7 @@ impl App {
     fn bump(self) {
         self.fmt.set(self.doc.with_value(Doc::selection_format));
         self.history.set(self.doc.with_value(Doc::history));
+        self.stats.set(self.doc.with_value(Doc::status_items));
         self.rev.update(|r| *r += 1);
     }
 
@@ -383,8 +389,12 @@ impl App {
 /// The page.
 pub fn mount() {
     let params = web_sys::window().and_then(|w| w.location().search().ok()).and_then(|s| web_sys::UrlSearchParams::new_with_str(&s).ok());
-    let sample = params.and_then(|p| p.get("sample")).unwrap_or_else(|| "sales".into());
+    let sample = params.as_ref().and_then(|p| p.get("sample")).unwrap_or_else(|| "sales".into());
+    let open = params.as_ref().and_then(|p| p.get("open"));
     let app = App::new(Doc::sample(&sample));
+    if let Some(path) = open {
+        files::open_from_url(app, path);
+    }
     leptos::mount::mount_to_body(move || view! { <Window app=app/> });
 }
 
@@ -1086,7 +1096,7 @@ fn clipboard(app: App, ev: &web_sys::ClipboardEvent, cut: bool) {
 #[component]
 fn StatusBar(app: App) -> impl IntoView {
     let tabs = move || app.with(|d| d.sheet_tabs());
-    let stats = move || app.with(|d| d.status_items());
+    let stats = move || app.stats.get();
     view! {
         <div class="status">
             <div class="glass tabs">
