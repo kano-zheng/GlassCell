@@ -111,6 +111,63 @@ import Testing
         #expect(replies.last?.contains(#""ok":false"#) == true)
     }
 
+    @Test func onlyRequestLinesAreRequests() {
+        let request = #"{"id": 1, "method": "cell.get"}"#
+        #expect(ControlServer.classify(Data(request.utf8)) == .request(Data(request.utf8)))
+        #expect(ControlServer.classify(Data(" \r".utf8)) == .blank)
+        #expect(ControlServer.classify(Data()) == .blank)
+        let rejected = ["POST / HTTP/1.1", "GET /favicon.ico HTTP/1.1", "PRI * HTTP/2.0", "Host: 127.0.0.1:7979", "not json",
+                        "[1, 2]", "42", #"{"id": 1}"#, #"{"method": 7}"#]
+        for line in rejected {
+            guard case .reject = ControlServer.classify(Data(line.utf8)) else {
+                Issue.record("accepted \(line)")
+                continue
+            }
+        }
+        guard case .reject = ControlServer.classify(Data([0x7B, 0xFF, 0xFE, 0x7D])) else {
+            Issue.record("accepted bytes that aren't UTF-8")
+            return
+        }
+        guard case .reject = ControlServer.classify(Data(request.utf8), max: 8) else {
+            Issue.record("accepted a line over the limit")
+            return
+        }
+    }
+
+    @Test func nothingAfterALineThatIsNotARequestRuns() async throws {
+        let (document, editor) = open()
+        defer { withExtendedLifetime(editor) {} }
+        let server = try ControlServer(port: 0)
+        defer { server.stop() }
+        let port = try #require(await server.port())
+        // A browser POST: request line, headers, blank line, then a JSON body that must not run.
+        let replies = try await Self.exchange(port: port, lines: [
+            #"{"id": 1, "method": "cell.set", "params": {"cell": "A1", "input": "kept"}}"#,
+            "POST / HTTP/1.1",
+            "Host: 127.0.0.1:\(port)",
+            "Content-Type: text/plain",
+            "",
+            #"{"id": 2, "method": "cell.set", "params": {"cell": "A2", "input": "ran"}}"#,
+        ])
+        #expect(replies.count == 2)
+        #expect(replies.first?.contains(#""ok":true"#) == true)
+        #expect(replies.last?.contains("HTTP is not served here") == true)
+        // Text that isn't JSON closes it too.
+        let afterGarbage = try await Self.exchange(port: port, lines: [
+            "",
+            "hello",
+            #"{"id": 3, "method": "cell.set", "params": {"cell": "A3", "input": "ran"}}"#,
+        ])
+        #expect(afterGarbage.count == 1 && afterGarbage.first?.contains(#""ok":false"#) == true)
+        let a1 = await call("cell.get", ["cell": "A1"])["result"] as? [String: Any]
+        #expect(a1?["text"] as? String == "kept")
+        for cell in ["A2", "A3"] {
+            let text = (await call("cell.get", ["cell": cell])["result"] as? [String: Any])?["text"] as? String
+            #expect(text != "ran", "\(cell)")
+        }
+        withExtendedLifetime(document) {}
+    }
+
     /// Sends `lines`, half-closes, and reads every reply line.
     nonisolated private static func exchange(port: UInt16, lines: [String]) async throws -> [String] {
         let connection = NWConnection(host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port) ?? .any, using: .tcp)
