@@ -67,13 +67,16 @@ struct GlassScroller: View {
             let offset = extent > 0 ? travel * min(max(now.offset / extent, 0), 1) : 0
             let active = hovering || scrolling || dragStart != nil
             let thin: CGFloat = active ? 9 : 7
-            ZStack(alignment: axis == .horizontal ? .leading : .top) {
+            // The horizontal knob sits low in its strip, as near the window's edge as the
+            // vertical one is to its own.
+            ZStack(alignment: axis == .horizontal ? .bottomLeading : .top) {
                 Color.clear
                 // Only the knob, and only once the pointer is near (or it is being dragged).
                 Capsule()
                     .fill(.secondary.opacity(0.7))
                     .frame(width: axis == .horizontal ? knob : thin, height: axis == .horizontal ? thin : knob)
                     .offset(x: axis == .horizontal ? Self.inset + offset : 0, y: axis == .horizontal ? 0 : Self.inset + offset)
+                    .padding(.bottom, axis == .horizontal ? 2 : 0)
                     .opacity(active ? 1 : 0)
             }
             // The mouse in AppKit: once pressed, the scroller gets every drag until the release,
