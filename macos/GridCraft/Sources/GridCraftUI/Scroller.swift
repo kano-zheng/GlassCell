@@ -47,7 +47,7 @@ struct GlassScroller: View {
     /// The offset and extent when a drag began (the extent stays put while dragging).
     @State private var dragStart: (offset: CGFloat, extent: CGFloat)?
     @State private var hovering = false
-    /// The vertical knob shows for a moment while the sheet scrolls under the wheel.
+    /// The knob shows for a moment while the sheet scrolls.
     @State private var scrolling = false
     @State private var hideTask: Task<Void, Never>?
 
@@ -110,8 +110,7 @@ struct GlassScroller: View {
         .onHover { hovering = $0 }
         .animation(.smooth(duration: 0.2), value: hovering)
         .animation(.smooth(duration: 0.2), value: scrolling)
-        .onChange(of: state.y) {
-            guard axis == .vertical else { return }
+        .onChange(of: state.along(axis).offset) {
             scrolling = true
             hideTask?.cancel()
             hideTask = Task {
