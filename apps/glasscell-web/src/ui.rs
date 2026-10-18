@@ -14,6 +14,8 @@ use wasm_bindgen::JsCast as _;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlInputElement, KeyboardEvent, PointerEvent, WheelEvent};
 
 mod dialogs;
+mod files;
+mod menus;
 
 use crate::doc::{Doc, ObjectRef, ResizeEdge, kind_name};
 use crate::icons;
@@ -21,6 +23,8 @@ use crate::measure::CanvasMeasure;
 use crate::render::{self, Frame, Preview, Scene};
 use crate::shortcuts::{self, Chord, Press};
 use dialogs::{Dialog, DialogHost};
+use files::{open_file, save_file};
+use menus::{ContextMenuHost, OpenMenu, Target};
 
 /// An entry in progress (the cell's editor and the formula bar share it).
 #[derive(Clone, Debug, PartialEq)]
@@ -63,6 +67,11 @@ enum Drag {
         source: RangeRef,
         grab: CellRef,
     },
+    /// Dragging a new area added with ⌘-click: it starts at `anchor`, after `keep` areas.
+    AddArea {
+        anchor: CellRef,
+        keep: usize,
+    },
 }
 
 /// A filter dropdown that is open: its header cell, the filter button it hangs from (view
@@ -102,6 +111,10 @@ struct App {
     mac: bool,
     /// The open dialog.
     dialog: RwSignal<Option<Dialog>, LocalStorage>,
+    /// The open context menu.
+    menu: RwSignal<Option<OpenMenu>, LocalStorage>,
+    /// The file the workbook was opened from or last saved to (a File System Access handle).
+    file: StoredValue<Option<wasm_bindgen::JsValue>, LocalStorage>,
 }
 
 impl App {
@@ -129,6 +142,8 @@ impl App {
             shortcuts: StoredValue::new_local(table),
             mac,
             dialog: RwSignal::new_local(None),
+            menu: RwSignal::new_local(None),
+            file: StoredValue::new_local(None),
         }
     }
 
@@ -198,10 +213,19 @@ impl App {
     fn shortcut(self, id: &str) {
         match id {
             "file.open" => open_file(self),
-            "file.save" | "file.saveAs" => save_file(self),
+            "file.save" => save_file(self, false),
+            "file.saveAs" => save_file(self, true),
             id if id.starts_with("file.") => {}
             id => self.act(id, json!({})),
         }
+    }
+
+    /// The window's size in points, for placing menus.
+    fn size_window(self) -> (f32, f32) {
+        let w = web_sys::window();
+        let dim =
+            |v: Option<Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>>| v.and_then(Result::ok).and_then(|x| x.as_f64()).unwrap_or(800.0) as f32;
+        (dim(w.as_ref().map(|w| w.inner_width())), dim(w.as_ref().map(|w| w.inner_height())))
     }
 
     fn focus_grid(self) {
@@ -366,6 +390,13 @@ pub fn mount() {
 
 #[component]
 fn Window(app: App) -> impl IntoView {
+    // Closing the page with unsaved changes asks first.
+    window_event_listener(leptos::ev::beforeunload, move |ev: web_sys::BeforeUnloadEvent| {
+        if app.doc.with_value(Doc::is_dirty) {
+            ev.prevent_default();
+            ev.set_return_value("This workbook has unsaved changes.");
+        }
+    });
     window_event_listener(leptos::ev::keydown, move |ev: KeyboardEvent| {
         if (ev.meta_key() || ev.ctrl_key()) && ev.shift_key() && ev.key().eq_ignore_ascii_case("p") {
             ev.prevent_default();
@@ -381,6 +412,7 @@ fn Window(app: App) -> impl IntoView {
             <GridView app=app/>
             <Palette app=app/>
             <DialogHost app=app/>
+            <ContextMenuHost app=app/>
         </div>
     }
 }
@@ -441,7 +473,7 @@ fn Toolbar(app: App) -> impl IntoView {
     let left = flag(app, |f| f.alignment.h.map(|h| h == gridcraft_engine::model::HAlign::Left));
     let center = flag(app, |f| f.alignment.h.map(|h| h == gridcraft_engine::model::HAlign::Center));
     let right = flag(app, |f| f.alignment.h.map(|h| h == gridcraft_engine::model::HAlign::Right));
-    let title = move || app.with(|d| d.title());
+    let title = move || app.with(|d| format!("{}{}", d.title(), if d.is_dirty() { " •" } else { "" }));
     let number_code = move || app.fmt.with(|f| f.as_ref().and_then(|f| f.number.code.clone())).unwrap_or_default();
     let zoom = move || app.with(|d| d.sheet().map(|s| s.zoom).unwrap_or(100)).to_string();
     view! {
@@ -508,7 +540,7 @@ fn Toolbar(app: App) -> impl IntoView {
             <div class="spacer"></div>
             <div class="glass capsule">
                 <Tool label="Open…" path=icons::OPEN press=move || open_file(app)/>
-                <Tool label="Save as xlsx" path=icons::SAVE press=move || save_file(app)/>
+                <Tool label="Save as xlsx" path=icons::SAVE press=move || save_file(app, false)/>
                 <Tool label="Search Commands" path=icons::SEARCH press=move || app.palette.set(true)/>
                 <select class="pick" title="Zoom" prop:value=zoom on:change=move |ev| app.act("view.zoom", json!({"percent": event_target_value(&ev).parse::<u32>().unwrap_or(100)}))>
                     {[50, 75, 100, 125, 150, 200].map(|z| view! { <option value=z.to_string()>{format!("{z}%")}</option> })}
@@ -522,60 +554,6 @@ fn Toolbar(app: App) -> impl IntoView {
 }
 
 // MARK: - Files
-
-fn open_file(app: App) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(input) = document.create_element("input").ok().and_then(|e| e.dyn_into::<HtmlInputElement>().ok()) else { return };
-    input.set_type("file");
-    input.set_accept(".xlsx,.xlsm,.xls,.ods,.csv,.tsv,.txt,.json");
-    let picked = input.clone();
-    let on_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-        let Some(file) = picked.files().and_then(|f| f.get(0)) else { return };
-        let name = file.name();
-        let reader = file.array_buffer();
-        wasm_bindgen_futures::spawn_local(async move {
-            match await_buffer(reader).await {
-                Some(buffer) => {
-                    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-                    app.change(|d| d.open_bytes(&name, &bytes).map(|_| ()));
-                }
-                None => app.show(Some("Couldn't read that file.".into())),
-            }
-        });
-    });
-    input.set_onchange(Some(on_change.as_ref().unchecked_ref()));
-    on_change.forget();
-    input.click();
-}
-
-fn save_file(app: App) {
-    let r = app.doc.try_update_value(|d| d.run("file.saveBytes", json!({"format": "xlsx"}))).unwrap_or(Ok(Json::Null));
-    let bytes = r.as_ref().ok().and_then(|v| v.get("base64")).and_then(Json::as_str).and_then(crate::doc::unbase64);
-    let Some(bytes) = bytes else {
-        app.show(Some(r.err().unwrap_or_else(|| "Couldn't save the workbook.".into())));
-        return;
-    };
-    let array = js_sys::Uint8Array::from(bytes.as_slice());
-    let parts = js_sys::Array::of1(&array);
-    let options = web_sys::BlobPropertyBag::new();
-    options.set_type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &options) else { return };
-    let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else { return };
-    if let Some(a) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.create_element("a").ok())
-        .and_then(|e| e.dyn_into::<web_sys::HtmlAnchorElement>().ok())
-    {
-        a.set_href(&url);
-        a.set_download(&format!("{}.xlsx", app.doc.with_value(Doc::title).trim_end_matches(".xlsx")));
-        a.click();
-    }
-    let _ = web_sys::Url::revoke_object_url(&url);
-}
-
-async fn await_buffer(p: js_sys::Promise) -> Option<js_sys::ArrayBuffer> {
-    wasm_bindgen_futures::JsFuture::from(p).await.ok().and_then(|v| v.dyn_into().ok())
-}
 
 // MARK: - Formula bar
 
@@ -766,7 +744,7 @@ fn GridView(app: App) -> impl IntoView {
                 class="grid"
                 node_ref=app.canvas
                 tabindex="0"
-                aria-label="Spreadsheet grid"
+                aria-label=move || format!("Spreadsheet grid. Selected: {}", app.with(|d| d.selection().map(|s| s.a1()).unwrap_or_default()))
                 on:pointerdown=move |ev: PointerEvent| {
                     if ev.button() != 0 || js_sys::Date::now() < quiet_until.get_value() {
                         return;
@@ -795,6 +773,15 @@ fn GridView(app: App) -> impl IntoView {
                         } else {
                             drag.set_value(Drag::Resize { edge, start: if edge.columns { x } else { y }, original: edge.size });
                         }
+                        return;
+                    }
+                    // ⌘-click (Ctrl elsewhere) adds an area to the selection.
+                    let additive = if app.mac { ev.meta_key() } else { ev.ctrl_key() };
+                    if additive && let Some(cell) = app.doc.with_value(|d| d.layout(size).and_then(|l| d.cell_at(&l, x, y))) {
+                        app.selected.set(None);
+                        let keep = app.doc.with_value(|d| d.selection().map_or(0, |s| s.ranges.len()));
+                        drag.set_value(Drag::AddArea { anchor: cell, keep });
+                        app.change(|d| d.select_area(cell, cell, keep));
                         return;
                     }
                     // Over the cells: an object, the fill handle, or a cell.
@@ -854,8 +841,30 @@ fn GridView(app: App) -> impl IntoView {
                 on:pointermove=move |ev: PointerEvent| {
                     let (x, y) = (ev.offset_x() as f32, ev.offset_y() as f32);
                     let size = app.size.get_untracked();
+                    // A drag past the edge of the cells scrolls the sheet along.
+                    let autoscroll = |x: f32, y: f32| {
+                        let header = app.doc.with_value(|d| d.layout(size).map(|l| (l.header_w, l.header_h))).unwrap_or((0.0, 0.0));
+                        let step = |at: f32, low: f32, high: f32| if at > high - 2.0 { 20.0 } else if at < low { -20.0 } else { 0.0 };
+                        let (dx, dy) = (step(x, header.0, size.0), step(y, header.1, size.1));
+                        if dx != 0.0 || dy != 0.0 {
+                            app.change(|d| {
+                                d.scroll_by(size, dx, dy);
+                                Ok(())
+                            });
+                        }
+                    };
                     match drag.get_value() {
-                        Drag::Select => app.select_at(x, y, true),
+                        Drag::Select => {
+                            autoscroll(x, y);
+                            app.select_at(x, y, true);
+                        }
+                        Drag::AddArea { anchor, keep } => {
+                            autoscroll(x, y);
+                            let cell = app.doc.with_value(|d| d.layout(size).map(|l| l.geo.cell_at(x.max(l.header_w + 1.0), y.max(l.header_h + 1.0))));
+                            if let Some(cell) = cell {
+                                app.change(|d| d.select_area(anchor, cell, keep));
+                            }
+                        }
                         Drag::Resize { edge, start, original } => {
                             let scale = app.doc.with_value(|d| d.layout(size).map(|l| l.scale)).unwrap_or(1.0);
                             let at = if edge.columns { x } else { y };
@@ -977,6 +986,31 @@ fn GridView(app: App) -> impl IntoView {
                         app.begin_edit(None, false);
                     }
                 }
+                on:contextmenu=move |ev: web_sys::MouseEvent| {
+                    ev.prevent_default();
+                    let (x, y) = (ev.offset_x() as f32, ev.offset_y() as f32);
+                    let size = app.size.get_untracked();
+                    // What it is on, and whether the press selects it first (outside the selection).
+                    let target = app.doc.with_value(|d| {
+                        let (l, sel) = (d.layout(size)?, d.selection()?);
+                        if y < l.header_h && x >= l.header_w {
+                            let c = l.geo.col_at(x);
+                            Some((Target::Columns, !sel.ranges.iter().any(|r| r.is_full_cols() && c >= r.start.col && c <= r.end.col)))
+                        } else if x < l.header_w && y >= l.header_h {
+                            let r = l.geo.row_at(y);
+                            Some((Target::Rows, !sel.ranges.iter().any(|a| a.is_full_rows() && r >= a.start.row && r <= a.end.row)))
+                        } else if x >= l.header_w && y >= l.header_h {
+                            Some((Target::Cells, !sel.contains(l.geo.cell_at(x, y))))
+                        } else {
+                            None
+                        }
+                    });
+                    let Some((target, select)) = target else { return };
+                    if select {
+                        app.select_at(x, y, false);
+                    }
+                    app.open_menu(target, ev.client_x() as f32, ev.client_y() as f32);
+                }
                 on:wheel=move |ev: WheelEvent| {
                     ev.prevent_default();
                     let (mut dx, mut dy) = (ev.delta_x() as f32, ev.delta_y() as f32);
@@ -1060,7 +1094,19 @@ fn StatusBar(app: App) -> impl IntoView {
                     tabs()
                         .into_iter()
                         .enumerate()
-                        .map(|(i, (name, on))| view! { <button class:on=on on:click=move |_| app.act("sheet.activate", json!({"sheet": i}))>{name}</button> })
+                        .map(|(i, (name, on))| view! {
+                            <button
+                                class:on=on
+                                on:click=move |_| app.act("sheet.activate", json!({"sheet": i}))
+                                on:dblclick=move |_| app.run_action(menus::Action::RenameSheet(i))
+                                on:contextmenu=move |ev: web_sys::MouseEvent| {
+                                    ev.prevent_default();
+                                    app.open_menu(Target::Tab(i), ev.client_x() as f32, ev.client_y() as f32);
+                                }
+                            >
+                                {name}
+                            </button>
+                        })
                         .collect_view()
                 }}
                 <button title="Insert Sheet" aria-label="Insert Sheet" on:click=move |_| app.act("home.insertSheet", json!({}))>"+"</button>

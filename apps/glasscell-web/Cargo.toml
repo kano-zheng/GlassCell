@@ -27,6 +27,6 @@ console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = [
     "Window", "Navigator", "MediaQueryList", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlInputElement", "HtmlTextAreaElement",
     "CanvasRenderingContext2d", "CanvasGradient", "TextMetrics", "CssStyleDeclaration", "DomRect", "Location", "UrlSearchParams",
-    "MouseEvent", "WheelEvent", "KeyboardEvent", "PointerEvent", "EventTarget", "ResizeObserver", "ResizeObserverEntry",
+    "MouseEvent", "BeforeUnloadEvent", "WheelEvent", "KeyboardEvent", "PointerEvent", "EventTarget", "ResizeObserver", "ResizeObserverEntry",
     "ClipboardEvent", "DataTransfer", "HtmlImageElement", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "ImageData",
 ] }

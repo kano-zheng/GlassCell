@@ -633,6 +633,51 @@ impl Doc {
         self.run(command, json!({})).map(|v| outline(&v))
     }
 
+    /// Adds the area `anchor`..`cell` to the selection (⌘-click), keeping the others; `anchor` is
+    /// the active cell. Called again while dragging, it replaces the area it added.
+    pub fn select_area(&mut self, anchor: CellRef, cell: CellRef, keep: usize) -> Result<(), String> {
+        let Some(sel) = self.selection() else { return Ok(()) };
+        let mut areas: Vec<String> = sel.ranges.iter().take(keep).map(|r| r.a1()).collect();
+        areas.push(RangeRef::new(anchor, cell).a1());
+        self.run("selection.set", json!({"range": areas.join(","), "active": anchor.a1()})).map(|_| ())
+    }
+
+    /// Filters the column of the active cell to the value it shows (the context menu's Filter by
+    /// Selected Cell's Value); a sheet without a filter gets one.
+    pub fn filter_by_active_value(&mut self) -> Result<(), String> {
+        let (Some(wb), Some(sheet), Some(sel)) = (self.workbook(), self.sheet(), self.selection()) else { return Ok(()) };
+        let cell = sel.active;
+        let text = if sheet.value(cell).is_empty() { "(Blanks)".to_string() } else { display::cell_text(wb, sheet, cell) };
+        let letters = gridcraft_engine::core::col_to_letters(cell.col);
+        let params =
+            if text == "(Blanks)" { json!({"column": letters, "values": [], "blanks": true}) } else { json!({"column": letters, "values": [text]}) };
+        self.run("data.filterBy", params).map(|_| ())
+    }
+
+    /// The workbook has changes that aren't saved.
+    pub fn is_dirty(&self) -> bool {
+        self.session.active().is_some_and(|d| d.is_dirty())
+    }
+
+    /// The workbook was written out: it has no unsaved changes now (and `name` is its title).
+    pub fn mark_saved(&mut self, name: Option<&str>) {
+        if let Some(d) = self.session.active_mut() {
+            d.saved = d.wb.clone();
+            if let Some(n) = name {
+                d.title = n.to_string();
+                d.path = None;
+            }
+        }
+    }
+
+    /// The workbook as xlsx bytes, and the file name to give them.
+    pub fn encode_xlsx(&mut self) -> Result<(String, Vec<u8>), String> {
+        let r = self.run("file.saveBytes", json!({"format": "xlsx"}))?;
+        let name = r.get("name").and_then(Json::as_str).unwrap_or("Book.xlsx").to_string();
+        let bytes = r.get("base64").and_then(Json::as_str).and_then(unbase64).ok_or("Couldn't save the workbook.")?;
+        Ok((name, bytes))
+    }
+
     /// The object `r`, as the engine lists it now.
     pub fn object(&self, r: ObjectRef) -> Option<ObjectView> {
         self.objects().into_iter().find(|o| o.id == r.id && kind_name(&o.kind) == r.kind)
@@ -1194,6 +1239,53 @@ mod tests {
         assert!(Doc::new().report("review.workbookStatistics").is_err(), "nothing open");
         doc.select(CellRef::new(0, 0), false).expect("select");
         assert!(doc.report("formulas.evaluateFormula").is_err(), "a cell with no formula has nothing to evaluate");
+    }
+
+    #[test]
+    fn command_click_adds_areas_and_dragging_replaces_the_last() {
+        let mut doc = Doc::sample("sales");
+        let at = |r: u32, c: u32| CellRef::new(r, c);
+        doc.select(at(4, 1), false).expect("press");
+        doc.select(at(5, 2), true).expect("drag");
+        assert_eq!(doc.selection().expect("selection").a1(), "B5:C6");
+        // ⌘-press elsewhere keeps the first area; dragging reshapes only the new one.
+        doc.select_area(at(8, 4), at(8, 4), 1).expect("add");
+        doc.select_area(at(8, 4), at(9, 6), 1).expect("drag");
+        let sel = doc.selection().expect("selection");
+        assert_eq!(sel.a1(), "B5:C6,E9:G10");
+        assert_eq!(sel.active, at(8, 4));
+        // A plain press goes back to one area.
+        doc.select(at(0, 0), false).expect("press");
+        assert_eq!(doc.selection().expect("selection").a1(), "A1");
+    }
+
+    #[test]
+    fn filtering_by_the_value_of_the_active_cell() {
+        let mut doc = Doc::sample("sales");
+        doc.select(CellRef::new(4, 1), false).expect("select North");
+        doc.filter_by_active_value().expect("filter");
+        let sh = doc.sheet().expect("sheet");
+        assert!(!sh.is_row_hidden(4) && sh.is_row_hidden(5), "only North stays");
+    }
+
+    #[test]
+    fn saving_clears_the_dirty_mark_and_encodes_xlsx() {
+        let mut doc = Doc::sample("sales");
+        assert!(!doc.is_dirty());
+        doc.select(CellRef::new(0, 0), false).expect("select");
+        doc.run("home.bold", json!({})).expect("bold");
+        assert!(doc.is_dirty());
+        let (name, bytes) = doc.encode_xlsx().expect("encode");
+        assert!(name.ends_with(".xlsx") && bytes.starts_with(b"PK"), "a zip: {name}");
+        doc.mark_saved(Some("Mine.xlsx"));
+        assert!(!doc.is_dirty());
+        assert_eq!(doc.title(), "Mine.xlsx");
+        doc.run("home.italic", json!({})).expect("italic");
+        assert!(doc.is_dirty());
+        // What was written opens again.
+        let mut other = Doc::new();
+        other.open_bytes("Mine.xlsx", &bytes).expect("reopen");
+        assert!(!other.sheet_tabs().is_empty());
     }
 
     #[test]
