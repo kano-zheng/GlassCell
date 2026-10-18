@@ -313,6 +313,7 @@ public final class GridNSView: NSView {
         if let format = try? document.engine.selectionFormat(), let layout = layoutCache {
             let size = CGFloat(format.active.fontSize ?? 11) * 96 / 72 * CGFloat(layout.scale)
             cellEditor.baseFont = NSFont(name: format.active.fontName ?? "", size: size) ?? .systemFont(ofSize: size)
+            cellEditor.valign = format.active.valign ?? .bottom
         }
         cellEditor.isHidden = false
         cellEditor.sync(force: true)
@@ -335,6 +336,16 @@ public final class GridNSView: NSView {
         let width = min(max(r.width, used.width + 12), max(r.width, bounds.width - r.minX))
         let height = max(r.height, used.height + 4)
         cellEditor.frame = NSRect(x: r.minX, y: r.minY, width: width, height: height)
+        // The text sits where the cell draws it (bottom by default), so the caret is not at the top.
+        let z = CGFloat(layout.scale)
+        let top = 1 * z, bottom = max(top, height - used.height - 1.5 * z)
+        let lineTop: CGFloat
+        switch cellEditor.valign {
+        case .top: lineTop = top
+        case .center, .justify, .distributed: lineTop = (top + bottom) / 2
+        case .bottom: lineTop = bottom
+        }
+        cellEditor.textContainerInset = NSSize(width: 2, height: lineTop)
         cellEditor.isHidden = r.maxX < layout.headerWidth || r.minY > gridSize.height
         let size = popup.fittingSize()
         popupGlass.isHidden = size == .zero || cellEditor.isHidden

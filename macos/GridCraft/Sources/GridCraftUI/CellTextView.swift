@@ -9,6 +9,8 @@ public final class CellTextView: NSTextView, NSTextViewDelegate {
     public weak var controller: EditController?
     /// This is the formula bar's editor (clicking into it starts or moves the edit there).
     public var isFormulaBar = false
+    /// The cell's vertical alignment: the editor's text sits where the grid draws it.
+    public var valign: VAlign = .bottom
     public var baseFont = NSFont.systemFont(ofSize: 13) {
         didSet { applyStyle() }
     }
