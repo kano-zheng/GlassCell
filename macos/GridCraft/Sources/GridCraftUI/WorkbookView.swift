@@ -13,7 +13,7 @@ public struct WorkbookView: View {
     static let inspectorWidth: CGFloat = 300
     static let inspectorMargin: CGFloat = 10
     /// Room between the vertical scroller and what is right of it.
-    static let scrollerMargin: CGFloat = 6
+    static let scrollerMargin: CGFloat = 3
     /// How much of the grid's top the toolbar and the formula bar cover.
     @State private var toolbarHeight: CGFloat = 0
     @State private var formulaBarHeight: CGFloat = 0
