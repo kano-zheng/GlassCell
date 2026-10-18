@@ -27,6 +27,9 @@ targets:
       - path: GridCraft/Sources/GridCraft
       - path: GridCraft/Resources/Localizable.xcstrings
         buildPhase: resources
+      - path: GridCraft/Resources/AppIcon.icon
+        type: file
+        buildPhase: resources
     dependencies:
       - package: GridCraft
         product: GridCraftUI
@@ -35,6 +38,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.kano-zheng.glasscell
         PRODUCT_NAME: GlassCell
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_FILE: GridCraft/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
   GridCraftQuickLook:

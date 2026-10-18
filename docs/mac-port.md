@@ -57,6 +57,7 @@ A native macOS frontend in SwiftUI over GridCraft's Rust engine, in a fork of `s
 - **MAC10.3 done.** The fork's commits are authored and committed as `kano-zheng` with a GitHub noreply address, and carry no co-author trailers (history rewritten before anything was published; the repo's own git identity is set the same way). `main` holds the fork; upstream's history stays as it is, so `git merge upstream/main` keeps working. The README sends contributors to `AGENTS.md`. Publishing: push `main` only (local backup refs still hold the old messages).
 - **MAC10.4 done.** The license stays GridCraft's, MIT OR Apache-2.0. `NOTICE` opens with GlassCell's notice (copyright kano-zheng, based on GridCraft by the ArtCraft team, independent of both teams) and keeps GridCraft's in full below, its trademark paragraph saying the brand files were removed from this fork. `LICENSE-MIT` adds a copyright line for kano-zheng under the original one, and the app's `NSHumanReadableCopyright` (Finder's Get Info, About) says the same.
 - **MAC10.5 done.** GlassCell's own CI and releases on GitHub Actions (`macos-26` runners, the newest non-beta Xcode on them, rustup, XcodeGen from Homebrew). `glasscell.yml` (push to `main`, pull requests): `build-engine.sh` (arm64), `swift test`, `build-xcode.sh`. `glasscell-release.yml` (a `v*` tag, or by hand for an existing tag): the engine for both architectures, tests, the app with the tag's version (`build-xcode.sh` now takes `MARKETING_VERSION` and `BUILD_NUMBER`), a `.dmg` (with an Applications link) and a `.zip` with `SHA256SUMS`, published with `gh release` under the workflow's token. Signed ad hoc, not notarized. Checked locally: the version override and the packaging; the workflows themselves first run on GitHub. Upstream's release workflows stay (they only run from a `release` branch GlassCell doesn't have).
+- **MAC10.7 done.** GlassCell's own app icon, original work: a raised active cell with its fill handle over a sheet of wide cells, white on a cyan-to-blue gradient (no green, nothing like Office's icons). It is an Icon Composer icon, `macos/GridCraft/Resources/AppIcon.icon` (`icon.json` and two hand-written SVG layers, both glass), so macOS 26 draws it in Liquid Glass with its dark, tinted and clear looks. `build-xcode.sh` compiles it through the project (`ASSETCATALOG_COMPILER_APPICON_NAME`), `build-app.sh` with `actool`; both bundles carry `Assets.car` and `AppIcon.icns`, and `Info.plist` names it (`CFBundleIconName`, `CFBundleIconFile`).
 - Known engine issues found by soaking `command_sequence_fuzz` (`GRIDCRAFT_FUZZ_SEEDS=300`), present before the fork's changes: a circular reference through a spill (`F7=SUM(E14:H16)` reading `H13=FILTER(F1:F20,…)`) recalculates differently incrementally and in full (seed 246), and seed 138's undo doesn't restore some sheet property. Not fixed yet.
 - Follow-up: the PDF printer still lays out its own text (overflow, wrapping) with PDF font metrics. It could use `viewport` with a PDF `Measure`.
 
@@ -140,6 +141,7 @@ A native macOS frontend in SwiftUI over GridCraft's Rust engine, in a fork of `s
 - **MAC10.3** Commit authorship and the public branch.
 - **MAC10.4** License notices.
 - **MAC10.5** CI and releases on GitHub Actions.
+- **MAC10.7** The app icon.
 
 ## Toolbar + inspector design
 
@@ -165,4 +167,4 @@ Comments and notes get their own sidebar.
 ## Open questions
 - Minimum macOS version: 26, or 27 only?
 - Distribution: Mac App Store (sandbox, entitlements) or notarized direct download?
-- Fork name and branding: **GlassCell** (MAC10.2); the ArtCraft marks are gone (MAC10.1). Its own app icon is still to come.
+- Fork name and branding: **GlassCell** (MAC10.2); the ArtCraft marks are gone (MAC10.1); its own app icon is MAC10.7.

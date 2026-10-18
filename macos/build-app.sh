@@ -27,6 +27,9 @@ cp "$BIN/GridCraft" "$APP/Contents/MacOS/GlassCell"
 sed -e "s/\$(MARKETING_VERSION)/$VERSION/g" -e "s/\$(CURRENT_PROJECT_VERSION)/$VERSION/g" "$ROOT/macos/GridCraft/Resources/Info.plist" > "$APP/Contents/Info.plist"
 # The String Catalog, compiled to .lproj tables.
 xcrun xcstringstool compile "$ROOT/macos/GridCraft/Resources/Localizable.xcstrings" --output-directory "$APP/Contents/Resources" >/dev/null
+# The app icon (Icon Composer): Assets.car for Liquid Glass, AppIcon.icns for older readers.
+xcrun actool "$ROOT/macos/GridCraft/Resources/AppIcon.icon" --compile "$APP/Contents/Resources" --app-icon AppIcon \
+    --platform macosx --minimum-deployment-target 26.0 --output-partial-info-plist "$OUT/AppIcon-partial.plist" >/dev/null
 # SwiftPM resource bundles, if any target gains resources.
 find "$BIN" -maxdepth 1 -name '*.bundle' -exec cp -R {} "$APP/Contents/Resources/" \;
 codesign --force --sign - --timestamp=none "$APP" >/dev/null
