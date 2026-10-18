@@ -66,10 +66,12 @@ struct GlassScroller: View {
             let thin: CGFloat = active ? 9 : 7
             ZStack(alignment: axis == .horizontal ? .leading : .top) {
                 Color.clear
+                // Only the knob, and only once the pointer is near (or it is being dragged).
                 Capsule()
-                    .fill(.secondary.opacity(active ? 0.7 : 0.45))
+                    .fill(.secondary.opacity(0.7))
                     .frame(width: axis == .horizontal ? knob : thin, height: axis == .horizontal ? thin : knob)
                     .offset(x: axis == .horizontal ? Self.inset + offset : 0, y: axis == .horizontal ? 0 : Self.inset + offset)
+                    .opacity(active ? 1 : 0)
             }
             // The mouse in AppKit: once pressed, the scroller gets every drag until the release,
             // wherever the pointer goes (a SwiftUI gesture inside the glass lost the drag when
@@ -101,9 +103,9 @@ struct GlassScroller: View {
             }
         }
         .frame(width: axis == .vertical ? Self.thickness(axis) : nil, height: axis == .horizontal ? Self.thickness(axis) : nil)
-        .glassEffect(.regular, in: .capsule)
+        .contentShape(.rect)
         .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.15), value: hovering)
+        .animation(.smooth(duration: 0.2), value: hovering)
         .accessibilityElement()
         .accessibilityLabel(axis == .horizontal ? "Horizontal scroll" : "Vertical scroll")
         .accessibilityValue(state.along(axis).extent > 0 ? "\(Int((state.along(axis).offset / state.along(axis).extent * 100).rounded()))%" : "0%")
