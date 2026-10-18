@@ -78,7 +78,8 @@ struct WorkbookStatusBar: View {
             .font(.callout)
         }
         .padding(.horizontal, 12)
-        .padding(.bottom, 10)
+        // Close to the window's edge, as the vertical scroller is to the right one.
+        .padding(.bottom, 3)
         .animation(.smooth(duration: 0.25), value: document.notice)
         .animation(.smooth(duration: 0.25), value: stats.isEmpty)
     }
