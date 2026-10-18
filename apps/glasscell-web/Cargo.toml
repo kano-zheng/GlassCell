@@ -1,0 +1,32 @@
+[package]
+name = "glasscell-web"
+description = "GlassCell in the browser: a Mac-style frontend (toolbar, inspector, glass) over the GridCraft engine, in Rust and wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "glasscell-web"
+path = "src/main.rs"
+
+[dependencies]
+gridcraft-engine = { workspace = true }
+gridcraft-chart = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+leptos = { version = "0.8", features = ["csr"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window", "Navigator", "MediaQueryList", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlInputElement", "HtmlTextAreaElement",
+    "CanvasRenderingContext2d", "CanvasGradient", "TextMetrics", "CssStyleDeclaration", "DomRect", "Location", "UrlSearchParams",
+    "MouseEvent", "WheelEvent", "KeyboardEvent", "PointerEvent", "EventTarget", "ResizeObserver", "ResizeObserverEntry",
+    "ClipboardEvent", "DataTransfer", "HtmlImageElement", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "ImageData",
+] }

@@ -43,6 +43,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("gridcraft", Class::Layer(7)),
     ("cli", Class::Layer(7)),
     ("web", Class::Layer(7)),
+    ("glasscell-web", Class::Layer(7)),
     ("xtask", Class::Exempt),
 ];
 
@@ -64,7 +65,7 @@ pub const FORMAT_ALLOWED: &[(&str, &[&str])] = &[("xlsx", &["core", "formula", "
 
 /// External crates that constitute a UI toolkit / windowing dependency.
 /// Entries ending in `*` are prefixes.
-pub const UI_CRATES: &[&str] = &["egui*", "eframe", "winit", "rfd", "wgpu*"];
+pub const UI_CRATES: &[&str] = &["egui*", "eframe", "winit", "rfd", "wgpu*", "leptos*"];
 
 /// First layer allowed to use UI crates.
 pub const UI_MIN_LAYER: u8 = 6;
@@ -302,7 +303,7 @@ mod tests {
 
     #[test]
     fn apps_and_xtask_exempt() {
-        for app in ["gridcraft", "gridcraft-cli", "gridcraft-web", "xtask"] {
+        for app in ["gridcraft", "gridcraft-cli", "gridcraft-web", "glasscell-web", "xtask"] {
             assert!(check(&[c(app, &[("egui", Normal, false), ("gridcraft-ui-egui", Normal, true)])]).is_empty());
         }
     }
