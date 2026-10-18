@@ -6,6 +6,7 @@
 #   CONFIG=Debug macos/build-xcode.sh
 #   ARCHS=arm64 macos/build-xcode.sh  # this Mac's architecture only (as the engine was built)
 #   MARKETING_VERSION=0.1.0 BUILD_NUMBER=42 macos/build-xcode.sh  # a release's version
+#   INSTALL=1 macos/build-xcode.sh  # and copy the app into /Applications afterwards
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -34,3 +35,4 @@ APP="$OUT/xcode/Build/Products/$CONFIG/GlassCell.app"
 [ -x "$APP/Contents/MacOS/GlassCell" ] || { echo "error: xcodebuild made no GlassCell.app" >&2; exit 1; }
 cp -R "$APP" "$OUT/GlassCell.app"
 echo "== done: $OUT/GlassCell.app"
+[ "${INSTALL:-0}" != 1 ] || "$ROOT/macos/install-app.sh"

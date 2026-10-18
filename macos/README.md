@@ -18,6 +18,8 @@ The native macOS frontend (SwiftUI, macOS 26+) over GridCraft's Rust engine. Pla
   document types, ad-hoc signed): quick, but without App Intents metadata or extensions.
 - `project.yml` + `build-xcode.sh`: the full app through Xcode (XcodeGen generates
   `GridCraft.xcodeproj`, not committed): App Intents metadata and the app extensions.
+- `install-app.sh`: copies `target/mac/GlassCell.app` into `/Applications`. Both build scripts run it
+  when `INSTALL=1` (`INSTALL=1 macos/build-xcode.sh`); `DEST=` picks another folder.
 
 ## Building and testing
 

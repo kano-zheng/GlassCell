@@ -3,6 +3,7 @@
 #
 #   macos/build-app.sh          # release; builds the engine first unless SKIP_ENGINE=1
 #   CONFIG=debug macos/build-app.sh
+#   INSTALL=1 macos/build-app.sh  # and copy the app into /Applications afterwards
 #   open target/mac/GlassCell.app
 set -euo pipefail
 
@@ -31,3 +32,4 @@ xcrun xcstringstool compile "$ROOT/macos/GridCraft/Resources/Localizable.xcstrin
 find "$BIN" -maxdepth 1 -name '*.bundle' -exec cp -R {} "$APP/Contents/Resources/" \;
 codesign --force --sign - --timestamp=none "$APP" >/dev/null
 echo "== done: $APP"
+[ "${INSTALL:-0}" != 1 ] || "$ROOT/macos/install-app.sh"
