@@ -47,6 +47,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             name_box
         ),
+        cmd!(
+            "edit.moveCells",
+            "Move Cells",
+            [],
+            None,
+            "{from: \"A1:B2\", to: \"D4\"} → {range}: moves the cells with their formats (a cut and a paste, one undo step) and selects them at `to`",
+            has_doc,
+            move_cells
+        ),
         cmd!(noundo "selection.set", "Select", [], None, "{range: \"A1:B2,D4\" | cell, active?: \"A1\", sheet?}", has_doc, selection_set),
         cmd!(noundo "selection.move", "Move Selection", [], None, "{dr, dc, extend?: bool, jump?: bool (Ctrl+arrow), page?: bool}", has_doc, selection_move),
         cmd!(noundo "selection.next", "Next Cell in Selection", [], None, "{forward?: true, byRow?: false} (Enter/Tab inside a selection)", has_doc, selection_next),
@@ -445,7 +454,12 @@ fn selection_set(s: &mut Session, p: &Json) -> Result<Json> {
     let active = cell_param(s, p, "active")?;
     let d = s.doc_mut()?;
     let active = active.or_else(|| ranges.last().map(|r| r.start)).unwrap_or_default();
-    let mut sel = crate::Selection { active, anchor: ranges.last().map(|r| r.start).unwrap_or(active), ranges };
+    // Shift-extension is anchored at the active cell when it is a corner of the area (a selection
+    // dragged right to left or upward starts at its bottom-right), else at the area's start.
+    let start = ranges.last().map(|r| r.start).unwrap_or(active);
+    let is_corner = |r: &RangeRef| (active.row == r.start.row || active.row == r.end.row) && (active.col == r.start.col || active.col == r.end.col);
+    let anchor = if ranges.last().is_some_and(is_corner) { active } else { start };
+    let mut sel = crate::Selection { active, anchor, ranges };
     if let Some(sh) = d.wb.active() {
         sel.expand_merges(sh);
     }
@@ -825,6 +839,19 @@ fn copy(s: &mut Session, p: &Json) -> Result<Json> {
 fn cut(s: &mut Session, p: &Json) -> Result<Json> {
     copy_impl(s, p, true)
 }
+/// Dragging a selection's border: the cells move as a cut and a paste, in one history step (the
+/// two run directly, not through `Session::execute`, which would record a step for each).
+fn move_cells(s: &mut Session, p: &Json) -> Result<Json> {
+    let from = str_param(p, "from").and_then(RangeRef::parse).ok_or_else(|| bad("edit.moveCells", "missing or invalid `from`"))?;
+    let to = cell_param(s, p, "to")?.ok_or_else(|| bad("edit.moveCells", "missing `to`"))?;
+    cut(s, &json!({"range": from.a1()}))?;
+    paste(s, &json!({"at": to.a1()}))?;
+    let end = to.offset_clamped(i64::from(from.height()) - 1, i64::from(from.width()) - 1);
+    let moved = RangeRef::new(to, end);
+    s.doc_mut()?.selection = crate::Selection::range(moved);
+    Ok(json!({"range": moved.a1()}))
+}
+
 fn clear_clipboard(s: &mut Session, _: &Json) -> Result<Json> {
     s.clipboard = None;
     s.format_painter = None;
@@ -1688,6 +1715,45 @@ mod tests {
         assert_eq!(get(&mut s, "A3")["value"], json!(true));
         assert_eq!(get(&mut s, "A4")["value"], json!(200.5));
         assert!(s.execute("cell.set", json!({"cell": "A5"})).is_err());
+    }
+
+    #[test]
+    fn a_selection_made_right_to_left_extends_from_where_it_began() {
+        let mut s = Session::new();
+        s.new_workbook();
+        // Pressed at E5 and dragged left to B5: E5 stays active and is the anchor.
+        s.execute("selection.set", json!({"range": "B5:E5", "active": "E5"})).unwrap();
+        let sel = s.doc().unwrap().selection.clone();
+        assert_eq!((sel.active, sel.anchor), (CellRef::parse("E5").unwrap(), CellRef::parse("E5").unwrap()));
+        // Shift+Left moves the dragged end (B5), not the anchor.
+        s.execute("selection.move", json!({"dr": 0, "dc": -1, "extend": true})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.a1(), "A5:E5");
+        // Without `active` the area starts at its first cell, as before; a middle cell isn't an anchor.
+        s.execute("selection.set", json!({"range": "B2:D4"})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.anchor, CellRef::parse("B2").unwrap());
+        s.execute("selection.set", json!({"range": "B2:D4", "active": "C3"})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.anchor, CellRef::parse("B2").unwrap());
+    }
+
+    #[test]
+    fn moving_cells_is_one_undo_step() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[1, 2], [3, 4]]})).unwrap();
+        s.execute("cell.set", json!({"cell": "A5", "input": "=SUM(A1:B2)"})).unwrap();
+        let r = s.execute("edit.moveCells", json!({"from": "A1:B2", "to": "D4"})).unwrap();
+        assert_eq!(r["range"], "D4:E5");
+        let get = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap();
+        assert_eq!(get(&mut s, "D4")["value"], json!(1.0));
+        assert_eq!(get(&mut s, "E5")["value"], json!(4.0));
+        assert!(get(&mut s, "A1")["value"].is_null(), "the source is emptied");
+        assert_eq!(get(&mut s, "A5")["value"], json!(10.0), "formulas that read the cells follow them");
+        assert_eq!(s.doc().unwrap().selection.a1(), "D4:E5");
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(get(&mut s, "A1")["value"], json!(1.0), "one undo puts everything back");
+        assert!(get(&mut s, "D4")["value"].is_null());
+        assert!(s.execute("edit.moveCells", json!({"from": "nonsense", "to": "D4"})).is_err());
+        assert!(s.execute("edit.moveCells", json!({"from": "A1"})).is_err());
     }
 
     #[test]
