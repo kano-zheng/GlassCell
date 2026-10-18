@@ -210,6 +210,10 @@ pub fn cell_look(wb: &Workbook, si: usize, sh: &Sheet, c: CellRef, cf: Option<&m
         if st.font.underline != Underline::None {
             style.font.underline = st.font.underline;
         }
+        // In a differential style General means "not set" (#1163).
+        if st.num_fmt.as_str() != "General" {
+            style.num_fmt = st.num_fmt.clone();
+        }
         for (dst, src) in [
             (&mut style.borders.left, st.borders.left),
             (&mut style.borders.right, st.borders.right),
@@ -776,6 +780,21 @@ mod tests {
         assert_eq!(center_across_end(0, 20, |c| c <= 2), 2);
         assert_eq!(center_across_end(0, 20, |_| false), 0);
         assert_eq!(center_across_end(0, 1, |_| true), 1);
+    }
+
+    #[test]
+    fn conditional_number_format_reaches_the_cell_text() {
+        // #1163: a rule's number format replaces the cell's own; unmatched cells keep theirs.
+        let mut session = crate::Session::new();
+        session.new_workbook();
+        session.execute("range.setValues", serde_json::json!({"range": "A1", "values": [[1], [3], [4]]})).unwrap();
+        session.execute("home.numberFormat", serde_json::json!({"range": "A3", "code": "0.0"})).unwrap();
+        let rule = serde_json::json!({"type": "cellIs", "operator": "greater", "value": "2", "style": {"num_fmt": "0.00"}});
+        session.execute("home.conditionalFormat", serde_json::json!({"range": "A1:A3", "rule": rule})).unwrap();
+        let v = view(&session.active().unwrap().wb, (0, 5), (0, 5));
+        assert_eq!(text(&v, "A1").text, "1");
+        assert_eq!(text(&v, "A2").text, "3.00");
+        assert_eq!(text(&v, "A3").text, "4.00");
     }
 
     #[test]
