@@ -53,7 +53,7 @@ struct GlassScroller: View {
 
     /// The capsule's thickness.
     static func thickness(_ axis: Axis) -> CGFloat { axis == .horizontal ? 28 : 18 }
-    private static let inset: CGFloat = 10
+    private static let inset: CGFloat = 4
     private static let minimumKnob: CGFloat = 28
 
     var body: some View {

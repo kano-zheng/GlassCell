@@ -44,8 +44,9 @@ public struct WorkbookView: View {
                 WorkbookStatusBar(document: document, scrollState: scrollState, scrollTo: { x in
                     if let grid = editor.grid { grid.scroll(to: CGPoint(x: x, y: grid.scroll.y)) }
                 }, wheel: { editor.grid?.scrollWheel(with: $0) })
-                    // Its statistics move out from under the inspector.
-                    .padding(.trailing, document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0)
+                    // Its statistics move out from under the inspector and the vertical scroller.
+                    .padding(.trailing, (document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0)
+                        + (scrollState.extentY > 0 ? GlassScroller.thickness(.vertical) : 0))
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statusBarHeight = $0 }
             }
             .overlay(alignment: .topTrailing) {
@@ -55,7 +56,8 @@ public struct WorkbookView: View {
                         if let grid = editor.grid { grid.scroll(to: CGPoint(x: grid.scroll.x, y: y)) }
                     }, wheel: { editor.grid?.scrollWheel(with: $0) })
                     .padding(.top, formulaBarHeight + scrollState.cellsTop + 6)
-                    .padding(.bottom, statusBarHeight + 4)
+                    // To the window's bottom: the status bar leaves its right end to the scroller.
+                    .padding(.bottom, Self.scrollerMargin)
                     .padding(.trailing, Self.scrollerMargin + (document.showInspector ? Self.inspectorWidth + Self.inspectorMargin : 0))
                 }
             }
