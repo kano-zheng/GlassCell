@@ -47,6 +47,9 @@ struct GlassScroller: View {
     /// The offset and extent when a drag began (the extent stays put while dragging).
     @State private var dragStart: (offset: CGFloat, extent: CGFloat)?
     @State private var hovering = false
+    /// The vertical knob shows for a moment while the sheet scrolls under the wheel.
+    @State private var scrolling = false
+    @State private var hideTask: Task<Void, Never>?
 
     /// The capsule's thickness.
     static func thickness(_ axis: Axis) -> CGFloat { axis == .horizontal ? 28 : 18 }
@@ -62,7 +65,7 @@ struct GlassScroller: View {
             let knob = min(track, max(Self.minimumKnob, track * now.visible / max(extent + now.visible, 1)))
             let travel = max(0, track - knob)
             let offset = extent > 0 ? travel * min(max(now.offset / extent, 0), 1) : 0
-            let active = hovering || dragStart != nil
+            let active = hovering || scrolling || dragStart != nil
             let thin: CGFloat = active ? 9 : 7
             ZStack(alignment: axis == .horizontal ? .leading : .top) {
                 Color.clear
@@ -106,6 +109,16 @@ struct GlassScroller: View {
         .contentShape(.rect)
         .onHover { hovering = $0 }
         .animation(.smooth(duration: 0.2), value: hovering)
+        .animation(.smooth(duration: 0.2), value: scrolling)
+        .onChange(of: state.y) {
+            guard axis == .vertical else { return }
+            scrolling = true
+            hideTask?.cancel()
+            hideTask = Task {
+                try? await Task.sleep(for: .seconds(1))
+                if !Task.isCancelled { scrolling = false }
+            }
+        }
         .accessibilityElement()
         .accessibilityLabel(axis == .horizontal ? "Horizontal scroll" : "Vertical scroll")
         .accessibilityValue(state.along(axis).extent > 0 ? "\(Int((state.along(axis).offset / state.along(axis).extent * 100).rounded()))%" : "0%")
